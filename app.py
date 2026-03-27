@@ -1,6 +1,5 @@
 from fastapi import FastAPI, HTTPException
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
 import os
@@ -8,30 +7,846 @@ from typing import Optional
 
 app = FastAPI(title="HZ Trading App")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 API_KEY = os.getenv("API_SPORTS_KEY", "")
 API_BASE = "https://v1.basketball.api-sports.io"
 
-# Priority leagues: id -> (name, season)
 LEAGUES = {
-    120: ("BSL / TBL",    "2025-2026"),
-    4:   ("ACB",          "2025-2026"),
-    6:   ("ABA Liga",     "2025-2026"),
-    23:  ("LNB Pro A",    "2025-2026"),
-    8:   ("Lega A",       "2025-2026"),
-    3:   ("EuroLeague",   "2025-2026"),
-    2:   ("EuroCup",      "2025-2026"),
-    15:  ("BBL",          "2025-2026"),
-    11:  ("GBL",          "2025-2026"),
-    22:  ("BCL",          "2025-2026"),
-    12:  ("NBA",          "2025"),
+    120: ("BSL / TBL",  "2025-2026"),
+    4:   ("ACB",        "2025-2026"),
+    6:   ("ABA Liga",   "2025-2026"),
+    23:  ("LNB Pro A",  "2025-2026"),
+    8:   ("Lega A",     "2025-2026"),
+    3:   ("EuroLeague", "2025-2026"),
+    2:   ("EuroCup",    "2025-2026"),
+    15:  ("BBL",        "2025-2026"),
+    11:  ("GBL",        "2025-2026"),
+    22:  ("BCL",        "2025-2026"),
+    12:  ("NBA",        "2025"),
 }
+
+HTML = r"""
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HZ Trading</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#07080b; --s1:#0d0e13; --s2:#111218; --border:#1a1b24; --border2:#22232f;
+  --text:#c9cdd8; --dim:#3e4055; --dim2:#555770;
+  --under:#00b4d8; --over:#e63946; --green:#2dc653; --gold:#f4a261; --white:#f0f1f5;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;min-height:100vh;overflow-x:hidden;}
+
+/* ── TOPBAR ── */
+.topbar{
+  position:sticky;top:0;z-index:200;
+  background:var(--s1);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 20px;height:50px;
+}
+.logo{font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:20px;letter-spacing:4px;color:var(--white);}
+.logo em{color:var(--green);font-style:normal;}
+.topbar-right{display:flex;align-items:center;gap:12px;}
+.live-pill{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--dim2);letter-spacing:1px;}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--dim);transition:background .3s;}
+.dot.live{background:var(--green);box-shadow:0 0 6px var(--green);animation:pulse 1.5s infinite;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.br-chip{
+  background:var(--s2);border:1px solid var(--border2);
+  padding:4px 12px;font-size:12px;color:var(--gold);
+  cursor:pointer;font-family:'Barlow Condensed',sans-serif;font-size:15px;letter-spacing:1px;
+  transition:border-color .15s;
+}
+.br-chip:hover{border-color:var(--gold);}
+.icon-btn{
+  background:none;border:1px solid var(--border2);color:var(--dim2);
+  padding:5px 12px;font-size:11px;letter-spacing:1px;cursor:pointer;
+  font-family:'Barlow',sans-serif;transition:all .15s;text-transform:uppercase;
+}
+.icon-btn:hover{border-color:var(--green);color:var(--green);}
+.icon-btn.spin{animation:rotate .7s linear infinite;}
+@keyframes rotate{to{transform:rotate(360deg)}}
+
+/* ── LAYOUT ── */
+.app{display:grid;grid-template-columns:1fr 320px;min-height:calc(100vh - 50px);}
+.panel-left{padding:20px;overflow-y:auto;}
+.panel-right{
+  background:var(--s1);border-left:1px solid var(--border);
+  padding:20px;overflow-y:auto;display:flex;flex-direction:column;gap:12px;
+}
+
+/* ── SECTION LABEL ── */
+.sec{font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--dim);margin-bottom:10px;display:flex;align-items:center;gap:10px;}
+.sec::after{content:'';flex:1;height:1px;background:var(--border);}
+
+/* ── BANKROLL EDITOR ── */
+.br-editor{
+  display:none;background:var(--s2);border:1px solid var(--border);
+  padding:14px 16px;margin-bottom:14px;
+}
+.br-editor.open{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.br-editor label{font-size:10px;color:var(--dim2);letter-spacing:1px;text-transform:uppercase;}
+.br-editor input{
+  background:var(--bg);border:1px solid var(--border2);color:var(--gold);
+  font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:700;
+  padding:6px 12px;outline:none;width:120px;
+}
+.br-editor input:focus{border-color:var(--gold);}
+.btn-xs{
+  background:var(--green);border:none;color:var(--bg);
+  font-family:'Barlow',sans-serif;font-size:11px;font-weight:700;
+  padding:7px 14px;cursor:pointer;letter-spacing:1px;text-transform:uppercase;
+}
+
+/* ── GAME CARDS ── */
+.games-wrap{display:flex;flex-direction:column;gap:2px;}
+.game-card{
+  background:var(--s2);border:1px solid var(--border);
+  cursor:pointer;transition:border-color .15s;
+  display:grid;grid-template-columns:4px 1fr;
+  position:relative;
+}
+.game-card:hover{border-color:var(--border2);}
+.game-card.selected{border-color:var(--dim2);}
+.game-card.sig-under{border-color:rgba(0,180,216,.4);}
+.game-card.sig-over {border-color:rgba(230,57,70,.4);}
+.game-card.sig-a    {box-shadow:0 0 16px rgba(45,198,83,.1);}
+.card-stripe{width:4px;}
+.sig-under .card-stripe{background:var(--under);}
+.sig-over  .card-stripe{background:var(--over);}
+.sig-a     .card-stripe{background:var(--green);}
+.card-body{padding:12px 14px;}
+.card-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
+.card-league{font-size:10px;letter-spacing:1.5px;color:var(--dim2);text-transform:uppercase;}
+.card-status{font-size:10px;color:var(--gold);}
+.card-teams{display:grid;grid-template-columns:1fr auto 1fr;gap:6px;align-items:center;margin-bottom:8px;}
+.card-team{font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:700;color:var(--white);}
+.card-team.away{text-align:right;}
+.card-score{text-align:center;}
+.score-num{font-family:'Barlow Condensed',sans-serif;font-size:24px;font-weight:900;color:var(--white);line-height:1;}
+.score-q1 {font-size:10px;color:var(--dim2);margin-top:1px;}
+.card-bot{display:flex;justify-content:space-between;align-items:center;padding-top:8px;border-top:1px solid var(--border);}
+.card-sig-badge{font-size:10px;font-weight:700;letter-spacing:1.5px;padding:2px 8px;border:1px solid;}
+.card-sig-badge.under{color:var(--under);border-color:rgba(0,180,216,.3);}
+.card-sig-badge.over {color:var(--over); border-color:rgba(230,57,70,.3);}
+.card-sig-badge.none {color:var(--dim);  border-color:var(--border);}
+.card-stufe{font-size:10px;font-weight:700;padding:2px 8px;}
+.card-stufe.a{background:var(--green);color:var(--bg);}
+.card-stufe.b{background:var(--gold);  color:var(--bg);}
+.card-stufe.c{color:var(--dim);}
+
+/* ── H2H INPUTS (on card expand) ── */
+.card-inputs{
+  display:none;padding:12px 14px;border-top:1px solid var(--border);
+  background:var(--s1);
+}
+.card-inputs.open{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;}
+.inp-group{display:flex;flex-direction:column;gap:4px;}
+.inp-group label{font-size:9px;letter-spacing:1.5px;color:var(--dim2);text-transform:uppercase;}
+.inp-group input{
+  background:var(--bg);border:1px solid var(--border2);
+  color:var(--white);font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:600;
+  padding:6px 8px;outline:none;width:100%;
+}
+.inp-group input:focus{border-color:var(--under);}
+.calc-mini{
+  grid-column:1/-1;background:var(--white);border:none;
+  font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:900;
+  letter-spacing:3px;padding:10px;cursor:pointer;text-transform:uppercase;color:var(--bg);
+  transition:background .1s;
+}
+.calc-mini:hover{background:#dde1f0;}
+
+/* ── MANUAL FORM ── */
+.manual-toggle{
+  background:none;border:1px dashed var(--border2);color:var(--dim2);
+  width:100%;padding:12px;font-size:11px;letter-spacing:2px;text-transform:uppercase;
+  cursor:pointer;font-family:'Barlow',sans-serif;transition:all .15s;margin-bottom:2px;
+}
+.manual-toggle:hover{border-color:var(--dim);color:var(--text);}
+.manual-form{
+  display:none;background:var(--s2);border:1px solid var(--border);padding:16px;margin-bottom:2px;
+}
+.manual-form.open{display:block;}
+.mf-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;}
+.mf-inp{display:flex;flex-direction:column;gap:4px;}
+.mf-inp label{font-size:9px;letter-spacing:1.5px;color:var(--dim2);text-transform:uppercase;}
+.mf-inp input{
+  background:var(--bg);border:1px solid var(--border2);
+  color:var(--white);font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:700;
+  padding:8px 10px;outline:none;
+}
+.mf-inp input:focus{border-color:var(--green);}
+.checks-row{display:flex;gap:16px;margin-bottom:10px;flex-wrap:wrap;}
+.chk{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;}
+.chk-box{width:16px;height:16px;border:1px solid var(--border2);background:var(--bg);display:flex;align-items:center;justify-content:center;font-size:10px;transition:all .1s;}
+.chk.on .chk-box{background:var(--over);border-color:var(--over);color:#fff;}
+.chk-lbl{font-size:11px;color:var(--dim2);}
+.chk.on .chk-lbl{color:var(--text);}
+.btn-calc{
+  width:100%;background:var(--white);border:none;color:var(--bg);
+  font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:900;
+  letter-spacing:4px;padding:14px;cursor:pointer;text-transform:uppercase;
+  transition:background .1s;
+}
+.btn-calc:hover{background:#dde1f0;}
+
+/* empty state */
+.empty{
+  text-align:center;padding:48px 20px;color:var(--dim);
+  border:1px dashed var(--border);font-size:12px;line-height:2.2;
+}
+
+/* ── RIGHT PANEL ── */
+
+/* Big signal */
+.big-signal{
+  border:1px solid var(--border);padding:28px 20px 24px;text-align:center;
+  transition:border-color .3s,box-shadow .3s;
+}
+.big-signal.under{border-color:rgba(0,180,216,.4);background:rgba(0,180,216,.03);}
+.big-signal.over {border-color:rgba(230,57,70,.4); background:rgba(230,57,70,.03);}
+.big-signal.skip {border-color:var(--border);}
+.big-signal.glow-a{box-shadow:0 0 32px rgba(45,198,83,.15);}
+
+.sig-dir{
+  font-family:'Barlow Condensed',sans-serif;font-weight:900;
+  font-size:64px;letter-spacing:6px;line-height:1;
+}
+.under .sig-dir{color:var(--under);}
+.over  .sig-dir{color:var(--over);}
+.skip  .sig-dir{color:var(--dim);font-size:40px;}
+
+.sig-stufe-badge{
+  display:inline-block;margin-top:8px;
+  font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:700;letter-spacing:5px;
+  padding:3px 16px;border:1px solid;text-transform:uppercase;
+}
+.st-a{color:var(--green);border-color:rgba(45,198,83,.4);}
+.st-b{color:var(--gold); border-color:rgba(244,162,97,.4);}
+.st-c{color:var(--dim);  border-color:var(--border);}
+
+.sig-reasons{margin-top:10px;font-size:11px;line-height:2;color:var(--dim2);}
+.r-ok  {color:var(--green);}
+.r-warn{color:var(--gold);}
+.r-bad {color:var(--over);}
+
+/* stats */
+.stats-4{display:grid;grid-template-columns:repeat(4,1fr);gap:2px;}
+.stat{background:var(--s2);border:1px solid var(--border);padding:10px 8px;text-align:center;}
+.stat-v{font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:700;color:var(--white);}
+.stat-v.pos{color:var(--under);}
+.stat-v.neg{color:var(--over);}
+.stat-v.gold{color:var(--gold);}
+.stat-l{font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--dim);margin-top:2px;}
+
+/* stake */
+.stake-box{
+  background:var(--s2);border:1px solid var(--border);
+  padding:14px 16px;display:flex;justify-content:space-between;align-items:center;
+}
+.stake-meta{display:flex;flex-direction:column;gap:3px;}
+.stake-lbl{font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--dim);}
+.stake-desc{font-size:11px;color:var(--dim2);}
+.stake-amt{font-family:'Barlow Condensed',sans-serif;font-size:32px;font-weight:700;color:var(--gold);}
+.stake-amt.none{color:var(--dim);font-size:20px;}
+
+/* over counter */
+.over-counter{
+  background:var(--s2);border:1px solid var(--border);
+  padding:12px 16px;display:flex;justify-content:space-between;align-items:center;
+}
+.oc-label{font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--dim);}
+.oc-val{font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:700;color:var(--gold);}
+.oc-val.max{color:var(--green);}
+.oc-btns{display:flex;gap:4px;}
+.oc-btn{
+  background:none;border:1px solid var(--border2);color:var(--dim2);
+  width:28px;height:28px;font-size:14px;cursor:pointer;transition:all .1s;
+  display:flex;align-items:center;justify-content:center;
+}
+.oc-btn:hover{border-color:var(--text);color:var(--text);}
+
+/* trade log */
+.trade-log{background:var(--s2);border:1px solid var(--border);flex:1;}
+.tl-head{padding:10px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;}
+.tl-title{font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--dim2);}
+.tl-stats{font-size:11px;color:var(--dim2);}
+.tl-row{
+  display:grid;grid-template-columns:1fr 52px 50px 44px;
+  gap:4px;padding:8px 14px;border-bottom:1px solid var(--border);
+  font-size:11px;align-items:center;
+}
+.tl-row:last-child{border-bottom:none;}
+.tl-game{color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.tl-dir{font-weight:700;letter-spacing:1px;}
+.tl-dir.under{color:var(--under);}
+.tl-dir.over {color:var(--over);}
+.tl-amt{color:var(--dim2);text-align:right;}
+.tl-res{
+  text-align:center;cursor:pointer;padding:2px 4px;
+  border:1px solid var(--border);font-size:10px;letter-spacing:1px;
+  transition:all .1s;user-select:none;
+}
+.tl-res.win {color:var(--green);border-color:rgba(45,198,83,.3);}
+.tl-res.loss{color:var(--over); border-color:rgba(230,57,70,.3);}
+.tl-res.open{color:var(--gold); border-color:rgba(244,162,97,.3);}
+.tl-empty{padding:16px;text-align:center;font-size:11px;color:var(--dim);}
+.add-trade{
+  width:100%;background:none;border-top:1px solid var(--border);
+  color:var(--dim2);font-family:'Barlow',sans-serif;font-size:11px;
+  padding:10px;cursor:pointer;letter-spacing:1px;text-transform:uppercase;
+  transition:all .15s;
+}
+.add-trade:hover{color:var(--green);}
+
+/* responsive */
+@media(max-width:720px){
+  .app{grid-template-columns:1fr;}
+  .panel-right{border-left:none;border-top:1px solid var(--border);}
+}
+</style>
+</head>
+<body>
+
+<!-- TOPBAR -->
+<div class="topbar">
+  <div class="logo">HZ <em>TRADING</em></div>
+  <div class="topbar-right">
+    <div class="live-pill">
+      <div class="dot" id="liveDot"></div>
+      <span id="liveLabel">OFFLINE</span>
+    </div>
+    <div class="br-chip" onclick="toggleBrEditor()">💰 <span id="brDisplay">21.88€</span></div>
+    <button class="icon-btn" id="refreshBtn" onclick="loadLive()">⟳ LIVE</button>
+  </div>
+</div>
+
+<!-- APP -->
+<div class="app">
+
+  <!-- LEFT -->
+  <div class="panel-left">
+
+    <!-- bankroll editor -->
+    <div class="br-editor" id="brEditor">
+      <label>Bankroll €</label>
+      <input type="number" id="brInput" step="0.01">
+      <button class="btn-xs" onclick="saveBr()">OK</button>
+    </div>
+
+    <!-- manual toggle -->
+    <button class="manual-toggle" onclick="toggleManual()">+ Manuell eingeben</button>
+
+    <!-- manual form -->
+    <div class="manual-form" id="manualForm">
+      <div class="mf-grid">
+        <div class="mf-inp"><label>H2H Ø Total (HZ)</label><input type="number" id="mH2H" placeholder="96.5" step="0.5" inputmode="decimal"></div>
+        <div class="mf-inp"><label>Bookie Line</label><input type="number" id="mLine" placeholder="91.5" step="0.5" inputmode="decimal"></div>
+        <div class="mf-inp"><label>Q1 Total</label><input type="number" id="mQ1" placeholder="52" inputmode="numeric"></div>
+        <div class="mf-inp"><label>Q2 aktuell</label><input type="number" id="mQ2" placeholder="28" inputmode="numeric"></div>
+        <div class="mf-inp"><label>Q2 Spielzeit (Min)</label><input type="number" id="mTimer" placeholder="4" min="0" max="10" step="0.5" inputmode="decimal"></div>
+        <div class="mf-inp"><label>Fouls gesamt</label><input type="number" id="mFouls" placeholder="5" inputmode="numeric"></div>
+        <div class="mf-inp"><label>FT% Ø (opt.)</label><input type="number" id="mFT" placeholder="—" min="0" max="100" inputmode="numeric"></div>
+        <div class="mf-inp"><label>FG% Quote (opt.)</label><input type="number" id="mFG" placeholder="—" min="0" max="100" inputmode="numeric"></div>
+      </div>
+      <div class="checks-row">
+        <div class="chk" id="chkDrop" onclick="this.classList.toggle('on')">
+          <div class="chk-box">✓</div><span class="chk-lbl">Linie fällt drastisch (≥8)</span>
+        </div>
+        <div class="chk" id="chkRise" onclick="this.classList.toggle('on')">
+          <div class="chk-box">✓</div><span class="chk-lbl">Linie steigt</span>
+        </div>
+      </div>
+      <button class="btn-calc" onclick="calcManual()">▶ SIGNAL BERECHNEN</button>
+    </div>
+
+    <!-- games list -->
+    <div class="sec">Live Spiele · Halbzeit</div>
+    <div class="games-wrap" id="gamesWrap">
+      <div class="empty">⟳ Klicke LIVE um Halbzeit-Spiele zu laden<br><span style="font-size:10px;color:var(--dim)">oder nutze manuelle Eingabe oben</span></div>
+    </div>
+
+  </div>
+
+  <!-- RIGHT -->
+  <div class="panel-right">
+
+    <!-- signal -->
+    <div class="big-signal skip" id="bigSig">
+      <div class="sig-dir" id="sigDir">WARTE</div>
+      <div class="sig-stufe-badge st-c" id="sigStufe">— —</div>
+      <div class="sig-reasons" id="sigReasons">Spiel auswählen oder manuell eingeben</div>
+    </div>
+
+    <!-- stats -->
+    <div class="stats-4">
+      <div class="stat"><div class="stat-v" id="stProj">—</div><div class="stat-l">Projektion</div></div>
+      <div class="stat"><div class="stat-v" id="stBuf">—</div><div class="stat-l">Buffer</div></div>
+      <div class="stat"><div class="stat-v" id="stTime">—</div><div class="stat-l">Zeit links</div></div>
+      <div class="stat"><div class="stat-v" id="stFouls">—</div><div class="stat-l">Fouls</div></div>
+    </div>
+
+    <!-- stake -->
+    <div class="stake-box">
+      <div class="stake-meta">
+        <span class="stake-lbl">Einsatz</span>
+        <span class="stake-desc" id="stakeDesc">—</span>
+      </div>
+      <div class="stake-amt none" id="stakeAmt">—</div>
+    </div>
+
+    <!-- over counter -->
+    <div class="over-counter">
+      <div>
+        <div class="oc-label">Over-Bet Zähler (Stufe B bis 20)</div>
+        <div class="oc-val" id="overCount">0 / 20</div>
+      </div>
+      <div class="oc-btns">
+        <button class="oc-btn" onclick="changeOverCount(-1)">−</button>
+        <button class="oc-btn" onclick="changeOverCount(1)">+</button>
+        <button class="oc-btn" onclick="resetOverCount()" title="Reset">↺</button>
+      </div>
+    </div>
+
+    <!-- trade log -->
+    <div class="trade-log">
+      <div class="tl-head">
+        <span class="tl-title">Trade Log</span>
+        <span class="tl-stats" id="tlStats">0W / 0L · 0€</span>
+      </div>
+      <div id="tlRows"><div class="tl-empty">Noch keine Trades</div></div>
+      <button class="add-trade" onclick="bookTrade()">+ Trade buchen</button>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ── STATE ──
+let bankroll = parseFloat(localStorage.getItem('hz_br') || '21.88');
+let trades   = JSON.parse(localStorage.getItem('hz_trades') || '[]');
+let overBets = parseInt(localStorage.getItem('hz_overbets') || '0');
+let currentSig = null;
+let currentGameName = '';
+
+// ── INIT ──
+updateBrDisplay();
+renderOverCount();
+renderTradeLog();
+
+// ── BANKROLL ──
+function toggleBrEditor() {
+  const ed = document.getElementById('brEditor');
+  ed.classList.toggle('open');
+  document.getElementById('brInput').value = bankroll;
+}
+function saveBr() {
+  bankroll = parseFloat(document.getElementById('brInput').value) || bankroll;
+  localStorage.setItem('hz_br', bankroll);
+  updateBrDisplay();
+  document.getElementById('brEditor').classList.remove('open');
+  if (currentSig) renderStake(currentSig);
+}
+function updateBrDisplay() {
+  document.getElementById('brDisplay').textContent = bankroll.toFixed(2) + '€';
+}
+
+// ── MANUAL FORM ──
+function toggleManual() {
+  document.getElementById('manualForm').classList.toggle('open');
+}
+
+function calcManual() {
+  const h2h   = parseFloat(document.getElementById('mH2H').value);
+  const line  = parseFloat(document.getElementById('mLine').value);
+  const q1    = parseFloat(document.getElementById('mQ1').value) || 0;
+  const q2    = parseFloat(document.getElementById('mQ2').value) || 0;
+  const timer = parseFloat(document.getElementById('mTimer').value) || 0;
+  const fouls = parseFloat(document.getElementById('mFouls').value) || 0;
+  const ft    = parseFloat(document.getElementById('mFT').value)  || null;
+  const fg    = parseFloat(document.getElementById('mFG').value)  || null;
+  const lineDrop = document.getElementById('chkDrop').classList.contains('on');
+  const lineRise = document.getElementById('chkRise').classList.contains('on');
+
+  if (!h2h || !line) { shake(); return; }
+
+  const sig = engine({ h2h, line, q1, q2, timer, fouls, ft, fg, lineDrop, lineRise });
+  currentGameName = 'Manuell';
+  currentSig = sig;
+  renderSignal(sig);
+
+  // inject as fake card
+  const wrap = document.getElementById('gamesWrap');
+  wrap.innerHTML = buildManualCard(sig, h2h, line, q1, q2);
+}
+
+function buildManualCard(sig, h2h, line, q1, q2) {
+  const htTotal = q1 + q2;
+  const cls = sig.dir === 'UNDER' ? 'sig-under' : sig.dir === 'OVER' ? 'sig-over' : '';
+  const glowCls = sig.stufe === 'A' ? 'sig-a' : '';
+  return `
+  <div class="game-card selected ${cls} ${glowCls}">
+    <div class="card-stripe"></div>
+    <div class="card-body">
+      <div class="card-top">
+        <span class="card-league">MANUELL · HT</span>
+        <span class="card-status">—</span>
+      </div>
+      <div class="card-teams">
+        <div class="card-team">Home</div>
+        <div class="card-score">
+          <div class="score-num">HT</div>
+          <div class="score-q1">Q1: ${q1} · Q2: ${q2}</div>
+        </div>
+        <div class="card-team away">Away</div>
+      </div>
+      <div class="card-bot">
+        <span style="font-size:10px;color:var(--dim2)">Proj: ${sig.proj.toFixed(1)} · H2H: ${h2h} · Line: ${line}</span>
+        <span class="card-sig-badge ${sig.dir.toLowerCase()}">${sig.dir}</span>
+        <span class="card-stufe ${sig.stufe.toLowerCase()}">${sig.stufe === 'C' ? 'SKIP' : sig.stufe}</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── LIVE LOADER ──
+async function loadLive() {
+  const btn = document.getElementById('refreshBtn');
+  btn.classList.add('spin');
+  btn.textContent = '⟳';
+
+  try {
+    const r = await fetch('/api/live');
+    const data = await r.json();
+    renderGames(data.games || []);
+    setLive(data.source === 'live' && data.count > 0);
+  } catch(e) {
+    document.getElementById('gamesWrap').innerHTML =
+      `<div class="empty">⚠ Fehler: ${e.message}<br><span style="font-size:10px">Nutze manuelle Eingabe.</span></div>`;
+    setLive(false);
+  }
+  btn.classList.remove('spin');
+  btn.textContent = '⟳ LIVE';
+}
+
+function setLive(on) {
+  const dot = document.getElementById('liveDot');
+  const lbl = document.getElementById('liveLabel');
+  dot.className = 'dot' + (on ? ' live' : '');
+  lbl.textContent = on ? 'LIVE' : 'OFFLINE';
+}
+
+function renderGames(games) {
+  const wrap = document.getElementById('gamesWrap');
+  if (!games.length) {
+    wrap.innerHTML = `<div class="empty">Keine HT/Q2 Spiele gerade live.<br><span style="font-size:10px">Nutze manuell Tab oder warte.</span></div>`;
+    return;
+  }
+  wrap.innerHTML = games.map(g => gameCard(g)).join('');
+}
+
+function gameCard(g) {
+  const htTotal = g.ht_total;
+  const statusLabel = g.status === 'Q2' ? `Q2 · ${g.timer || '?'}′` : 'HALBZEIT';
+  return `
+  <div class="game-card" id="gc-${g.id}" onclick="selectCard(${g.id})">
+    <div class="card-stripe"></div>
+    <div class="card-body">
+      <div class="card-top">
+        <span class="card-league">${g.league_name}</span>
+        <span class="card-status">${statusLabel}</span>
+      </div>
+      <div class="card-teams">
+        <div class="card-team">${g.home}</div>
+        <div class="card-score">
+          <div class="score-num">${g.total_home} – ${g.total_away}</div>
+          <div class="score-q1">Q1: ${g.q1_home}–${g.q1_away}</div>
+        </div>
+        <div class="card-team away">${g.away}</div>
+      </div>
+      <div class="card-bot">
+        <span style="font-size:10px;color:var(--dim2)">HT Total: ${htTotal}</span>
+        <span class="card-sig-badge none" id="badge-${g.id}">H2H + LINE →</span>
+        <span class="card-stufe c" id="stufe-${g.id}"></span>
+      </div>
+    </div>
+    <!-- inline inputs -->
+    <div class="card-inputs" id="ci-${g.id}">
+      <div class="inp-group"><label>H2H Ø</label><input type="number" id="ih2h-${g.id}" placeholder="96.5" step="0.5" inputmode="decimal"></div>
+      <div class="inp-group"><label>Bookie Line</label><input type="number" id="iline-${g.id}" placeholder="91.5" step="0.5" inputmode="decimal"></div>
+      <div class="inp-group"><label>Fouls</label><input type="number" id="ifouls-${g.id}" placeholder="5" min="0" inputmode="numeric"></div>
+      <button class="calc-mini" onclick="event.stopPropagation();calcCard(${g.id},${g.q1_total},${g.q2_live},${g.timer||0})">SIGNAL</button>
+    </div>
+  </div>`;
+}
+
+function selectCard(id) {
+  document.querySelectorAll('.game-card').forEach(c => {
+    c.classList.remove('selected');
+    const ci = c.querySelector('.card-inputs');
+    if (ci) ci.classList.remove('open');
+  });
+  const card = document.getElementById(`gc-${id}`);
+  card.classList.add('selected');
+  document.getElementById(`ci-${id}`).classList.add('open');
+}
+
+function calcCard(id, q1, q2live, timer) {
+  const h2h   = parseFloat(document.getElementById(`ih2h-${id}`).value);
+  const line  = parseFloat(document.getElementById(`iline-${id}`).value);
+  const fouls = parseFloat(document.getElementById(`ifouls-${id}`).value) || 0;
+  if (!h2h || !line) return;
+
+  const sig = engine({ h2h, line, q1, q2: q2live, timer, fouls, ft: null, fg: null, lineDrop: false, lineRise: false });
+  currentSig = sig;
+
+  // update card badge
+  const bEl = document.getElementById(`badge-${id}`);
+  const sEl = document.getElementById(`stufe-${id}`);
+  const card = document.getElementById(`gc-${id}`);
+  card.className = `game-card selected ${sig.dir === 'UNDER' ? 'sig-under' : sig.dir === 'OVER' ? 'sig-over' : ''} ${sig.stufe === 'A' ? 'sig-a' : ''}`;
+  bEl.className = `card-sig-badge ${sig.dir.toLowerCase()}`;
+  bEl.textContent = sig.dir;
+  sEl.className = `card-stufe ${sig.stufe.toLowerCase()}`;
+  sEl.textContent = sig.stufe === 'C' ? 'SKIP' : sig.stufe;
+
+  // get game name
+  const teamEls = card.querySelectorAll('.card-team');
+  currentGameName = teamEls[0]?.textContent + ' vs ' + teamEls[1]?.textContent;
+
+  renderSignal(sig);
+}
+
+// ── SIGNAL ENGINE ──
+function engine({ h2h, line, q1, q2, timer, fouls, ft, fg, lineDrop, lineRise }) {
+  const timeLeft = Math.max(0, 10 - timer);
+
+  // Projektion
+  let q2proj;
+  if (timer > 0.5 && q2 > 0) {
+    q2proj = q2 + (q2 / timer) * timeLeft;
+  } else {
+    q2proj = q1; // fallback: Q2 ≈ Q1
+  }
+  const proj   = q1 + q2proj;
+  const buffer = proj - line; // positiv = proj > line = UNDER value
+
+  // Katalysatoren
+  const foulsOverCat = fouls >= 8;
+  const ftOverCat    = ft !== null && ft >= 85;
+  const lineMoveCat  = lineDrop || lineRise;
+  const overCat      = foulsOverCat || ftOverCat || lineMoveCat;
+
+  // FG% UNDER skip
+  const fgSkip = fg !== null && fg > 60;
+
+  const entryOk = timeLeft >= 2.5;
+  const entryA  = timeLeft >= 3.5;
+
+  let dir = 'SKIP', stufe = 'C', reasons = [];
+
+  if (buffer >= 5 && entryOk && fouls < 8 && !fgSkip) {
+    dir = 'UNDER';
+    if (entryA && buffer >= 5) {
+      stufe = 'A';
+      reasons = [
+        `<span class="r-ok">✓ Buffer +${buffer.toFixed(1)} ≥ 5 Pts</span>`,
+        `<span class="r-ok">✓ Entry ${timeLeft.toFixed(1)}′ verbleibend</span>`,
+        `<span class="r-ok">✓ Fouls ${fouls} &lt; 8</span>`,
+      ];
+    } else {
+      stufe = 'B';
+      reasons = [
+        `<span class="r-warn">~ Buffer +${buffer.toFixed(1)} (3–4 Bereich)</span>`,
+        `<span class="r-warn">~ Entry ${timeLeft.toFixed(1)}′</span>`,
+      ];
+    }
+  } else if (buffer <= -3 && entryOk) {
+    dir = 'OVER';
+    // Stufe B until 20 bets, A with catalyst
+    if (overCat) {
+      stufe = 'A';
+      if (foulsOverCat) reasons.push(`<span class="r-ok">🔥 Fouls-Katalysator (${fouls} ≥ 8)</span>`);
+      if (ftOverCat)    reasons.push(`<span class="r-ok">🔥 FT%-Katalysator (${ft}% ≥ 85)</span>`);
+      if (lineMoveCat)  reasons.push(`<span class="r-ok">🔥 Linien-Bewegung</span>`);
+    } else {
+      stufe = overBets < 20 ? 'B' : 'C';
+      reasons.push(`<span class="r-warn">~ Buffer ${buffer.toFixed(1)} Pts unter Linie</span>`);
+      if (overBets >= 20) reasons.push(`<span class="r-bad">✗ 20 Over-Bets erreicht → SKIP</span>`);
+      else reasons.push(`<span class="r-warn">~ Kein Katalysator · Stufe B (${overBets}/20 Bets)</span>`);
+    }
+    reasons.push(`<span class="r-ok">✓ Entry ${timeLeft.toFixed(1)}′</span>`);
+  } else {
+    // SKIP
+    if (fgSkip)                reasons.push(`<span class="r-bad">✗ FG% ${fg}% &gt; 60 → UNDER SKIP</span>`);
+    if (!entryOk)              reasons.push(`<span class="r-bad">✗ Entry zu spät (${timeLeft.toFixed(1)}′ &lt; 2:30)</span>`);
+    if (Math.abs(buffer) < 3)  reasons.push(`<span class="r-bad">✗ Buffer zu klein (${buffer.toFixed(1)})</span>`);
+    if (fouls >= 8 && buffer > 0) reasons.push(`<span class="r-warn">⚠ Fouls ≥8 trotz UNDER → SKIP</span>`);
+    if (!reasons.length)       reasons.push(`<span class="r-bad">✗ Kein klares Signal</span>`);
+  }
+
+  return { dir, stufe, proj, buffer, timeLeft, fouls, reasons };
+}
+
+// ── RENDER SIGNAL ──
+function renderSignal(sig) {
+  const bs = document.getElementById('bigSig');
+  bs.className = `big-signal ${sig.dir.toLowerCase()} ${sig.stufe === 'A' ? 'glow-a' : ''}`;
+
+  document.getElementById('sigDir').textContent = sig.dir;
+
+  const stufeEl = document.getElementById('sigStufe');
+  stufeEl.textContent = sig.stufe === 'C' ? '— SKIP —' : `STUFE  ${sig.stufe}`;
+  stufeEl.className = `sig-stufe-badge st-${sig.stufe.toLowerCase()}`;
+
+  document.getElementById('sigReasons').innerHTML = sig.reasons.join('<br>') || '—';
+
+  // stats
+  document.getElementById('stProj').textContent = sig.proj.toFixed(1);
+
+  const bufEl = document.getElementById('stBuf');
+  bufEl.textContent = (sig.buffer >= 0 ? '+' : '') + sig.buffer.toFixed(1);
+  bufEl.className = `stat-v ${sig.buffer >= 3 ? 'pos' : sig.buffer <= -3 ? 'neg' : ''}`;
+
+  const tEl = document.getElementById('stTime');
+  tEl.textContent = sig.timeLeft.toFixed(1) + '′';
+  tEl.className = `stat-v ${sig.timeLeft >= 3.5 ? 'pos' : sig.timeLeft >= 2.5 ? 'gold' : 'neg'}`;
+
+  const fEl = document.getElementById('stFouls');
+  fEl.textContent = sig.fouls;
+  fEl.className = `stat-v ${sig.fouls >= 8 ? 'neg' : ''}`;
+
+  renderStake(sig);
+}
+
+function renderStake(sig) {
+  const amtEl  = document.getElementById('stakeAmt');
+  const descEl = document.getElementById('stakeDesc');
+
+  if (sig.stufe === 'C') {
+    amtEl.textContent = '—';
+    amtEl.className = 'stake-amt none';
+    descEl.textContent = 'Kein Trade';
+    return;
+  }
+  let amt, desc;
+  if (bankroll < 100) {
+    amt  = sig.stufe === 'A' ? 5.00 : 2.50;
+    desc = `Fix ${sig.stufe === 'A' ? '5€' : '2.50€'} · Bankroll < 100€`;
+  } else {
+    const pct = sig.stufe === 'A' ? 0.05 : 0.025;
+    amt  = bankroll * pct;
+    desc = `${sig.stufe === 'A' ? '5' : '2.5'}% von ${bankroll.toFixed(2)}€`;
+  }
+  amtEl.textContent = amt.toFixed(2) + '€';
+  amtEl.className = 'stake-amt';
+  descEl.textContent = desc;
+}
+
+// ── OVER COUNTER ──
+function changeOverCount(d) {
+  overBets = Math.max(0, Math.min(20, overBets + d));
+  localStorage.setItem('hz_overbets', overBets);
+  renderOverCount();
+  if (currentSig) {
+    currentSig = engine({ ...currentSig, h2h: currentSig.proj, line: currentSig.proj - currentSig.buffer });
+    renderSignal(currentSig);
+  }
+}
+function resetOverCount() {
+  overBets = 0;
+  localStorage.setItem('hz_overbets', 0);
+  renderOverCount();
+}
+function renderOverCount() {
+  const el = document.getElementById('overCount');
+  el.textContent = `${overBets} / 20`;
+  el.className = `oc-val ${overBets >= 20 ? 'max' : ''}`;
+}
+
+// ── TRADE LOG ──
+function bookTrade() {
+  if (!currentSig || currentSig.stufe === 'C') {
+    alert('Kein gültiges Signal (Stufe A oder B)!');
+    return;
+  }
+  let amt;
+  if (bankroll < 100) {
+    amt = currentSig.stufe === 'A' ? 5.00 : 2.50;
+  } else {
+    amt = bankroll * (currentSig.stufe === 'A' ? 0.05 : 0.025);
+  }
+
+  // increment over counter
+  if (currentSig.dir === 'OVER') {
+    changeOverCount(1);
+  }
+
+  trades.unshift({
+    id: Date.now(),
+    game: currentGameName || 'Manual',
+    dir: currentSig.dir,
+    stufe: currentSig.stufe,
+    amt: amt.toFixed(2),
+    result: 'open',
+  });
+  if (trades.length > 100) trades.pop();
+  localStorage.setItem('hz_trades', JSON.stringify(trades));
+  renderTradeLog();
+}
+
+function cycleResult(id) {
+  const t = trades.find(t => t.id === id);
+  if (!t) return;
+  t.result = { open: 'win', win: 'loss', loss: 'open' }[t.result];
+  localStorage.setItem('hz_trades', JSON.stringify(trades));
+  renderTradeLog();
+}
+
+function renderTradeLog() {
+  const rows = document.getElementById('tlRows');
+  if (!trades.length) {
+    rows.innerHTML = '<div class="tl-empty">Noch keine Trades</div>';
+    updateTlStats();
+    return;
+  }
+  rows.innerHTML = trades.slice(0, 15).map(t => `
+    <div class="tl-row">
+      <span class="tl-game" title="${t.game}">${t.game.length > 20 ? t.game.slice(0,18)+'…' : t.game}</span>
+      <span class="tl-dir ${t.dir.toLowerCase()}">${t.dir}</span>
+      <span class="tl-amt">${t.amt}€</span>
+      <span class="tl-res ${t.result}" onclick="cycleResult(${t.id})">${t.result.toUpperCase()}</span>
+    </div>
+  `).join('');
+  updateTlStats();
+}
+
+function updateTlStats() {
+  const wins   = trades.filter(t => t.result === 'win').length;
+  const losses = trades.filter(t => t.result === 'loss').length;
+  const total  = trades.reduce((s, t) => s + parseFloat(t.amt), 0);
+  document.getElementById('tlStats').textContent = `${wins}W / ${losses}L · ${total.toFixed(2)}€`;
+}
+
+// ── UTILS ──
+function shake() {
+  const f = document.getElementById('manualForm');
+  f.style.transform = 'translateX(-5px)';
+  setTimeout(() => f.style.transform = 'translateX(5px)', 80);
+  setTimeout(() => f.style.transform = '', 160);
+}
+</script>
+</body>
+</html>
+"""
+
 
 async def api_get(endpoint: str, params: dict) -> dict:
     headers = {
@@ -43,42 +858,41 @@ async def api_get(endpoint: str, params: dict) -> dict:
         r.raise_for_status()
         return r.json()
 
-# ── ENDPOINTS ──
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    return HTML
+
+@app.get("/api/health")
+async def health():
+    return {"status": "ok", "api_key_set": bool(API_KEY)}
+
+@app.get("/api/leagues")
+async def get_leagues():
+    return {"leagues": [{"id": k, "name": v[0], "season": v[1]} for k, v in LEAGUES.items()]}
 
 @app.get("/api/live")
 async def get_live_games():
-    """Fetch all HT + Q2 games from priority leagues."""
     if not API_KEY:
-        # Return demo data if no key
         return {"games": _demo_games(), "source": "demo"}
-
     results = []
     seen_ids = set()
-
     for league_id, (name, season) in LEAGUES.items():
         try:
-            data = await api_get("games", {
-                "league": league_id,
-                "season": season,
-                "live": "all"
-            })
+            data = await api_get("games", {"league": league_id, "season": season, "live": "all"})
             for g in (data.get("response") or []):
                 gid = g.get("id")
                 if gid in seen_ids:
                     continue
                 status = g.get("status", {}).get("short", "")
-                if status in ("HT", "Q2", "Q3", "Q4"):  # include Q2 too
+                if status in ("HT", "Q2", "Q3", "Q4"):
                     seen_ids.add(gid)
                     results.append(_normalize_game(g, league_id, name))
         except Exception:
             continue
-
     return {"games": results, "source": "live", "count": len(results)}
-
 
 @app.get("/api/games")
 async def get_games(league: int, season: str = "2025-2026", date: Optional[str] = None):
-    """Generic games fetch — for H2H history lookup."""
     if not API_KEY:
         return {"response": [], "error": "No API key configured"}
     params = {"league": league, "season": season}
@@ -88,20 +902,6 @@ async def get_games(league: int, season: str = "2025-2026", date: Optional[str] 
         return await api_get("games", params)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
-
-
-@app.get("/api/leagues")
-async def get_leagues():
-    return {"leagues": [
-        {"id": k, "name": v[0], "season": v[1]}
-        for k, v in LEAGUES.items()
-    ]}
-
-
-@app.get("/api/health")
-async def health():
-    return {"status": "ok", "api_key_set": bool(API_KEY)}
-
 
 def _normalize_game(g: dict, league_id: int, league_name: str) -> dict:
     scores = g.get("scores", {})
@@ -129,43 +929,18 @@ def _normalize_game(g: dict, league_id: int, league_name: str) -> dict:
         "ht_total": total_h + total_a,
     }
 
-
 def _demo_games():
     return [
-        {
-            "id": 1001, "league_id": 4, "league_name": "ACB",
-            "status": "HT", "timer": None,
-            "home": "Real Madrid", "away": "FC Barcelona",
-            "q1_home": 28, "q1_away": 24,
-            "q2_home": 0, "q2_away": 0,
-            "total_home": 28, "total_away": 24,
-            "q1_total": 52, "q2_live": 0, "ht_total": 52,
-        },
-        {
-            "id": 1002, "league_id": 120, "league_name": "TBL",
-            "status": "Q2", "timer": 5,
-            "home": "Fenerbahce", "away": "Galatasaray",
-            "q1_home": 31, "q1_away": 27,
-            "q2_home": 18, "q2_away": 14,
-            "total_home": 49, "total_away": 41,
-            "q1_total": 58, "q2_live": 32, "ht_total": 90,
-        },
-        {
-            "id": 1003, "league_id": 6, "league_name": "ABA Liga",
-            "status": "HT", "timer": None,
-            "home": "Crvena zvezda", "away": "Partizan",
-            "q1_home": 22, "q1_away": 26,
-            "q2_home": 0, "q2_away": 0,
-            "total_home": 22, "total_away": 26,
-            "q1_total": 48, "q2_live": 0, "ht_total": 48,
-        },
+        {"id": 1001, "league_id": 4, "league_name": "ACB", "status": "HT", "timer": None,
+         "home": "Real Madrid", "away": "FC Barcelona",
+         "q1_home": 28, "q1_away": 24, "q2_home": 0, "q2_away": 0,
+         "total_home": 28, "total_away": 24, "q1_total": 52, "q2_live": 0, "ht_total": 52},
+        {"id": 1002, "league_id": 120, "league_name": "TBL", "status": "Q2", "timer": 5,
+         "home": "Fenerbahce", "away": "Galatasaray",
+         "q1_home": 31, "q1_away": 27, "q2_home": 18, "q2_away": 14,
+         "total_home": 49, "total_away": 41, "q1_total": 58, "q2_live": 32, "ht_total": 90},
+        {"id": 1003, "league_id": 6, "league_name": "ABA Liga", "status": "HT", "timer": None,
+         "home": "Crvena zvezda", "away": "Partizan",
+         "q1_home": 22, "q1_away": 26, "q2_home": 0, "q2_away": 0,
+         "total_home": 22, "total_away": 26, "q1_total": 48, "q2_live": 0, "ht_total": 48},
     ]
-
-
-# Serve frontend
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-@app.get("/", response_class=HTMLResponse)
-async def root():
-    with open("static/index.html") as f:
-        return f.read()
