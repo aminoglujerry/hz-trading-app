@@ -552,10 +552,14 @@ function engine_hz({h2h,line,q1,q2,timer,fouls,ft,fg,lineDrop,lineRise}){
 
 // ── ENGINE FT (FT Total System) ─────────────────────────────────
 function engine_ft({line,current_total,ft_home,ft_away,fouls_home,fouls_away,lead,entry_min,pace}){
+  const FT_MIN_BUFFER=8;  // Minimum abs buffer to generate any signal
+  const FT_OVER_MIN=8;    // Over: projection must be 8+ pts under line
+  const FT_UNDER_MIN=10;  // Under: projection must be 10+ pts over line
+  const Q4_DURATION=10;   // Standard Q4 duration in minutes (European basketball)
   const ft_avg=(ft_home+ft_away)/2;
   const total_fouls=(fouls_home||0)+(fouls_away||0);
-  // Remaining Q4 minutes based on entry point
-  const remaining_min=entry_min<=30?10:Math.max(0,40-entry_min);
+  // Remaining Q4 minutes: full Q4 at Q3-break (min ≤30), otherwise partial Q4
+  const remaining_min=entry_min<=30?Q4_DURATION:Math.max(0,40-entry_min);
   const projection=current_total+pace*remaining_min;
   const buffer=projection-line; // +over / -under
   const puffer_abs=Math.abs(buffer);
@@ -571,19 +575,19 @@ function engine_ft({line,current_total,ft_home,ft_away,fouls_home,fouls_away,lea
     reasons.push(`<span class="r-bad">✗ Eintritt nach Minute 37 → Skip</span>`);
     return{_engine:'ft',dir,stufe,proj:projection,buffer,timeLeft:Math.max(0,40-entry_min),fouls:total_fouls,ft_avg,reasons};
   }
-  if(puffer_abs<8){
-    reasons.push(`<span class="r-bad">✗ Puffer ${buffer.toFixed(1)} &lt; 8 → Skip</span>`);
+  if(puffer_abs<FT_MIN_BUFFER){
+    reasons.push(`<span class="r-bad">✗ Puffer ${buffer.toFixed(1)} &lt; ${FT_MIN_BUFFER} → Skip</span>`);
     return{_engine:'ft',dir,stufe,proj:projection,buffer,timeLeft:Math.max(0,40-entry_min),fouls:total_fouls,ft_avg,reasons};
   }
 
   // ── OVER: projection 8+ under line ──
-  if(buffer<=-8){
+  if(buffer<=-FT_OVER_MIN){
     if(ft_home<75||ft_away<75){
       reasons.push(`<span class="r-bad">✗ FT% unter 75% → Skip Over (${ft_home}%/${ft_away}%)</span>`);
       return{_engine:'ft',dir,stufe,proj:projection,buffer,timeLeft:Math.max(0,40-entry_min),fouls:total_fouls,ft_avg,reasons};
     }
     dir='OVER';
-    if(isPrimeWindow&&puffer_abs>=10&&ft_home>=80&&ft_away>=80){
+    if(isPrimeWindow&&puffer_abs>=FT_UNDER_MIN&&ft_home>=80&&ft_away>=80){
       stufe='A';
       reasons.push(`<span class="r-ok">✓ Prime Window (Q3-Break)</span>`);
       reasons.push(`<span class="r-ok">✓ Puffer ${puffer_abs.toFixed(1)} Pkt unter Linie</span>`);
@@ -591,23 +595,23 @@ function engine_ft({line,current_total,ft_home,ft_away,fouls_home,fouls_away,lea
     }else{
       stufe='B';
       reasons.push(isPrimeWindow?`<span class="r-ok">✓ Prime Window</span>`:`<span class="r-warn">~ Außerhalb Prime Window (Min ${entry_min})</span>`);
-      reasons.push(puffer_abs>=10?`<span class="r-ok">✓ Puffer ${puffer_abs.toFixed(1)}</span>`:`<span class="r-warn">~ Puffer ${puffer_abs.toFixed(1)} &lt; 10</span>`);
+      reasons.push(puffer_abs>=FT_UNDER_MIN?`<span class="r-ok">✓ Puffer ${puffer_abs.toFixed(1)}</span>`:`<span class="r-warn">~ Puffer ${puffer_abs.toFixed(1)} &lt; ${FT_UNDER_MIN}</span>`);
       if(ft_home<80||ft_away<80)reasons.push(`<span class="r-warn">~ FT% unter 80% (${ft_home}%/${ft_away}%)</span>`);
     }
     reasons.push(total_fouls>=25?`<span class="r-ok">✓ Fouls ${total_fouls} ≥ 25</span>`:`<span class="r-warn">~ Fouls ${total_fouls} &lt; 25</span>`);
   }
   // ── UNDER: projection 10+ over line ──
-  else if(buffer>=10){
+  else if(buffer>=FT_UNDER_MIN){
     dir='UNDER';
-    if(isPrimeWindow&&buffer>=10&&ft_home>=80&&ft_away>=80){
+    if(isPrimeWindow&&buffer>=FT_UNDER_MIN&&ft_home>=80&&ft_away>=80){
       stufe='A';
       reasons.push(`<span class="r-ok">✓ Prime Window (Q3-Break)</span>`);
-      reasons.push(`<span class="r-ok">✓ Puffer +${buffer.toFixed(1)} ≥ 10</span>`);
+      reasons.push(`<span class="r-ok">✓ Puffer +${buffer.toFixed(1)} ≥ ${FT_UNDER_MIN}</span>`);
       reasons.push(`<span class="r-ok">✓ FT% ${ft_home}%/${ft_away}% ≥ 80%</span>`);
     }else{
       stufe='B';
       reasons.push(isPrimeWindow?`<span class="r-ok">✓ Prime Window</span>`:`<span class="r-warn">~ Außerhalb Prime Window (Min ${entry_min})</span>`);
-      reasons.push(buffer>=10?`<span class="r-ok">✓ Puffer +${buffer.toFixed(1)}</span>`:`<span class="r-warn">~ Puffer +${buffer.toFixed(1)}</span>`);
+      reasons.push(buffer>=FT_UNDER_MIN?`<span class="r-ok">✓ Puffer +${buffer.toFixed(1)}</span>`:`<span class="r-warn">~ Puffer +${buffer.toFixed(1)}</span>`);
       if(ft_home<80||ft_away<80)reasons.push(`<span class="r-warn">~ FT% unter 80%</span>`);
     }
     // Foul-risk check
@@ -702,7 +706,7 @@ function renderTradeLog(){
   if(!trades.length){rows.innerHTML='<div style="font-size:10px;color:var(--dim);padding:3px 0">Noch keine Trades</div>';updateTlStats();return;}
   rows.innerHTML=trades.slice(0,8).map(t=>{
     const engTag=t.engine==='ft'?`<span style="font-size:7px;color:var(--gold);letter-spacing:1px">FT</span>`:`<span style="font-size:7px;color:var(--under);letter-spacing:1px">HZ</span>`;
-    const nm=t.game.length>14?t.game.slice(0,12)+'…':t.game;
+    const nm=t.game.length>14?t.game.slice(0,14)+'…':t.game;
     return `<div class="tl-row"><span class="tl-game" title="${t.game}">${nm} ${engTag}</span><span class="tl-dir ${t.dir.toLowerCase()}">${t.dir}</span><span class="tl-amt">${t.amt}€</span><span class="tl-res ${t.result}" onclick="cycleResult(${t.id})">${t.result.toUpperCase()}</span></div>`;
   }).join('');
   updateTlStats();
@@ -832,7 +836,10 @@ def _normalize_game(g: dict, league_id: int, league_name: str) -> dict:
     venue_obj = g.get("venue") or {}
     venue_name = venue_obj.get("name") or ""
     venue_city = venue_obj.get("city") or ""
-    venue = f"{venue_name}, {venue_city}".strip(", ") if (venue_name or venue_city) else None
+    venue = (
+        f"{venue_name}, {venue_city}" if venue_name and venue_city
+        else venue_name or venue_city or None
+    )
 
     return {
         "id": g.get("id"),
