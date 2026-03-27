@@ -1,15 +1,50 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 import httpx
 import os
+import json
+import base64
+import logging
+import threading
+import asyncio
+from datetime import date, datetime
 from typing import Optional
 
-app = FastAPI(title="HZ Trading App")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger("hz-trading")
 
 API_KEY = os.getenv("API_SPORTS_KEY", "")
 API_BASE = "https://v1.basketball.api-sports.io"
+
+# Google Sheets config
+GOOGLE_SHEETS_ID = os.getenv("GOOGLE_SHEETS_ID", "")
+GOOGLE_SHEETS_TAB = os.getenv("GOOGLE_SHEETS_TAB", "h2h_2025_2026")
+GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
+
+# In-memory H2H cache: key = "home_id_away_id_league_id"
+_h2h_memory: dict = {}
+
+# Cached worksheet client (reset on each init call if connection fails)
+_worksheet_cache = None
+
+# Google Sheets column order
+_SHEETS_HEADERS = [
+    "home_team_id", "away_team_id", "league_id",
+    "h2h_avg", "h2h_last_5", "h2h_games", "trend", "last_updated",
+]
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    loop = asyncio.get_running_loop()
+    _start_h2h_refresh_scheduler(loop)
+    yield
+
+
+app = FastAPI(title="HZ Trading App", lifespan=lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 LEAGUES = {
     120: ("BSL / TBL",  "2025-2026"),
@@ -24,6 +59,227 @@ LEAGUES = {
     22:  ("BCL",        "2025-2026"),
     12:  ("NBA",        "2025"),
 }
+
+
+# ---------------------------------------------------------------------------
+# Google Sheets helpers
+# ---------------------------------------------------------------------------
+
+def _get_credentials():
+    """Parse Google service-account credentials from env var (path or base64 JSON)."""
+    raw = GOOGLE_CREDENTIALS_JSON.strip()
+    if not raw:
+        return None
+    # Try as a file path first
+    if os.path.isfile(raw):
+        with open(raw) as f:
+            return json.load(f)
+    # Try as base64-encoded JSON
+    try:
+        decoded = base64.b64decode(raw).decode("utf-8")
+        return json.loads(decoded)
+    except Exception:
+        pass
+    # Try as raw JSON string
+    try:
+        return json.loads(raw)
+    except Exception:
+        return None
+
+
+def init_google_sheets():
+    """Return an authorised gspread worksheet (cached), or None if not configured."""
+    global _worksheet_cache
+    if _worksheet_cache is not None:
+        return _worksheet_cache
+    if not GOOGLE_SHEETS_ID:
+        return None
+    creds_data = _get_credentials()
+    if not creds_data:
+        return None
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+
+        scopes = [
+            "https://spreadsheets.google.com/feeds",
+            "https://www.googleapis.com/auth/drive",
+        ]
+        creds = Credentials.from_service_account_info(creds_data, scopes=scopes)
+        client = gspread.authorize(creds)
+        sheet = client.open_by_key(GOOGLE_SHEETS_ID)
+        try:
+            worksheet = sheet.worksheet(GOOGLE_SHEETS_TAB)
+        except gspread.WorksheetNotFound:
+            worksheet = sheet.add_worksheet(title=GOOGLE_SHEETS_TAB, rows=5000, cols=len(_SHEETS_HEADERS))
+            worksheet.append_row(_SHEETS_HEADERS)
+        _worksheet_cache = worksheet
+        logger.info("Google Sheets connected: %s / %s", GOOGLE_SHEETS_ID, GOOGLE_SHEETS_TAB)
+        return worksheet
+    except Exception as exc:
+        logger.warning("Google Sheets init failed: %s", exc)
+        return None
+
+
+def get_h2h_from_sheets(home_id: int, away_id: int, league_id: int) -> Optional[dict]:
+    """Read H2H data: check in-memory cache first, then Google Sheets."""
+    key = f"{home_id}_{away_id}_{league_id}"
+    if key in _h2h_memory:
+        return _h2h_memory[key]
+
+    worksheet = init_google_sheets()
+    if worksheet is None:
+        return None
+    try:
+        records = worksheet.get_all_records()
+        for row in records:
+            if (str(row.get("home_team_id")) == str(home_id) and
+                    str(row.get("away_team_id")) == str(away_id) and
+                    str(row.get("league_id")) == str(league_id)):
+                result = {
+                    "h2h_avg": float(row.get("h2h_avg") or 0),
+                    "h2h_last_5": float(row.get("h2h_last_5") or 0),
+                    "h2h_games": int(row.get("h2h_games") or 0),
+                    "trend": row.get("trend", ""),
+                    "last_updated": row.get("last_updated", ""),
+                    "source": "sheets",
+                }
+                _h2h_memory[key] = result
+                return result
+    except Exception as exc:
+        logger.warning("Sheets read error for %s: %s", key, exc)
+    return None
+
+
+def write_h2h_to_sheets(home_id: int, away_id: int, league_id: int, h2h_data: dict) -> None:
+    """Write (or update) H2H row in Google Sheets and in-memory cache."""
+    key = f"{home_id}_{away_id}_{league_id}"
+    _h2h_memory[key] = {**h2h_data, "source": "sheets"}
+
+    worksheet = init_google_sheets()
+    if worksheet is None:
+        return
+    try:
+        records = worksheet.get_all_records()
+        row_index = None
+        for i, row in enumerate(records, start=2):  # row 1 is header
+            if (str(row.get("home_team_id")) == str(home_id) and
+                    str(row.get("away_team_id")) == str(away_id) and
+                    str(row.get("league_id")) == str(league_id)):
+                row_index = i
+                break
+        new_row = [
+            home_id, away_id, league_id,
+            round(h2h_data.get("h2h_avg", 0), 2),
+            round(h2h_data.get("h2h_last_5", 0), 2),
+            h2h_data.get("h2h_games", 0),
+            h2h_data.get("trend", ""),
+            datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        ]
+        if row_index:
+            worksheet.update(f"A{row_index}:H{row_index}", [new_row])
+        else:
+            worksheet.append_row(new_row)
+        logger.info("Sheets write OK: %s", key)
+    except Exception as exc:
+        logger.warning("Sheets write error for %s: %s", key, exc)
+
+
+async def calculate_h2h_average(home_id: int, away_id: int, league_id: int, season: str) -> Optional[dict]:
+    """Fetch historical H2H games from API and calculate averages."""
+    if not API_KEY:
+        return None
+    try:
+        data = await api_get("games", {"league": league_id, "season": season, "team": home_id})
+        games = data.get("response") or []
+        h2h = [
+            g for g in games
+            if (g.get("teams", {}).get("home", {}).get("id") == home_id and
+                g.get("teams", {}).get("away", {}).get("id") == away_id) or
+               (g.get("teams", {}).get("home", {}).get("id") == away_id and
+                g.get("teams", {}).get("away", {}).get("id") == home_id)
+        ]
+        if not h2h:
+            return None
+        totals = []
+        for g in h2h:
+            sc = g.get("scores", {})
+            h_tot = sc.get("home", {}).get("total") or 0
+            a_tot = sc.get("away", {}).get("total") or 0
+            if h_tot or a_tot:
+                totals.append(h_tot + a_tot)
+        if not totals:
+            return None
+        last5 = totals[-5:]
+        avg_all = sum(totals) / len(totals)
+        avg_last5 = sum(last5) / len(last5)
+        trend = ""
+        if len(totals) >= 2:
+            diff = avg_last5 - avg_all
+            if diff >= 2:
+                trend = f"↑ +{diff:.1f} (trending OVER)"
+            elif diff <= -2:
+                trend = f"↓ {diff:.1f} (trending UNDER)"
+            else:
+                trend = f"→ {diff:+.1f} (stable)"
+        return {
+            "h2h_avg": round(avg_all, 2),
+            "h2h_last_5": round(avg_last5, 2),
+            "h2h_games": len(totals),
+            "trend": trend,
+            "source": "api",
+        }
+    except Exception as exc:
+        logger.warning("H2H API calc error (%s vs %s, league %s): %s", home_id, away_id, league_id, exc)
+        return None
+
+
+async def refresh_h2h_cache() -> None:
+    """Refresh H2H data for all league/team combinations and write to Sheets."""
+    logger.info("H2H cache refresh started")
+    refreshed = 0
+    for league_id, (name, season) in LEAGUES.items():
+        try:
+            data = await api_get("teams", {"league": league_id, "season": season})
+            teams = [t.get("id") for t in (data.get("response") or []) if t.get("id")]
+        except Exception as exc:
+            logger.warning("Failed to fetch teams for league %s: %s", league_id, exc)
+            continue
+        for home_id in teams:
+            for away_id in teams:
+                if home_id == away_id:
+                    continue
+                h2h = await calculate_h2h_average(home_id, away_id, league_id, season)
+                if h2h:
+                    write_h2h_to_sheets(home_id, away_id, league_id, h2h)
+                    refreshed += 1
+                await asyncio.sleep(0.1)  # avoid hammering the API
+    logger.info("H2H cache refresh complete — %d pairs updated", refreshed)
+
+
+def _start_h2h_refresh_scheduler(loop: asyncio.AbstractEventLoop) -> None:
+    """Background thread: run refresh_h2h_cache on Mon/Wed/Fri at 02:00 UTC."""
+    import time
+
+    def _loop_fn():
+        while True:
+            now = datetime.utcnow()
+            # Monday=0, Wednesday=2, Friday=4
+            if now.weekday() in (0, 2, 4) and now.hour == 2 and now.minute == 0:
+                logger.info("Scheduled H2H refresh triggered")
+                try:
+                    future = asyncio.run_coroutine_threadsafe(refresh_h2h_cache(), loop)
+                    future.result(timeout=3600)  # wait up to 1h
+                except Exception as exc:
+                    logger.error("Scheduled H2H refresh failed: %s", exc)
+                time.sleep(61)  # skip duplicate triggers within the same minute
+            else:
+                time.sleep(30)
+
+    t = threading.Thread(target=_loop_fn, daemon=True, name="h2h-refresh")
+    t.start()
+    logger.info("H2H refresh scheduler started (Mon/Wed/Fri 02:00 UTC)")
+
 
 HTML = r"""<!DOCTYPE html>
 <html lang="de">
@@ -174,6 +430,10 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;min-
 .card-stufe.c{color:var(--dim);}
 .card-inputs{display:none;padding:10px 12px;border-top:1px solid var(--border);background:var(--s1);}
 .card-inputs.open{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;}
+.h2h-info{grid-column:1/-1;background:var(--bg);border:1px solid var(--border);padding:7px 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.h2h-avg{font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:700;color:var(--gold);}
+.h2h-meta{font-size:9px;color:var(--dim2);}
+.h2h-source{font-size:9px;padding:1px 6px;border:1px solid var(--border2);color:var(--dim2);margin-left:auto;}
 .inp-group{display:flex;flex-direction:column;gap:3px;}
 .inp-group label{font-size:8px;letter-spacing:1px;color:var(--dim2);text-transform:uppercase;}
 .inp-group input{background:var(--bg);border:1px solid var(--border2);color:var(--white);font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:600;padding:5px 7px;outline:none;width:100%;}
@@ -311,11 +571,16 @@ async function loadLive(){
   const btn=document.getElementById('refreshBtn');
   btn.textContent='...';
   try{
-    const r=await fetch('/api/live');
-    const data=await r.json();
-    renderGames(data.games||[]);
-    renderToday(data.today||[]);
-    setLive(data.source==='live'&&(data.count||0)>0);
+    // Use screened endpoint (H2H-enriched) for live HT/Q2 games
+    const [screened, daily] = await Promise.all([
+      fetch('/api/live/screened').then(r=>r.json()).catch(()=>({games:[],count:0})),
+      fetch('/api/live').then(r=>r.json()).catch(()=>({games:[],today:[],count:0}))
+    ]);
+    const liveGames=screened.games&&screened.games.length?screened.games:(daily.games||[]);
+    renderGames(liveGames);
+    renderToday(daily.today||[]);
+    const isLive=(screened.source==='live'||(daily.source==='live'))&&(liveGames.length>0);
+    setLive(isLive);
   }catch(e){
     document.getElementById('gamesWrap').innerHTML=`<div class="empty">⚠ ${e.message}</div>`;
     setLive(false);
@@ -365,6 +630,18 @@ function todayCard(g){
 function gameCard(g){
   const timer=g.timer||0;
   const statusLabel=g.status==='HT'?'HALBZEIT':`Q2·${timer}′`;
+  const hasH2H=g.h2h_avg!=null&&g.h2h_avg>0;
+  const h2hAvgVal=hasH2H?g.h2h_avg.toFixed(1):'—';
+  const h2hLast5=hasH2H&&g.h2h_last_5?g.h2h_last_5.toFixed(1):'—';
+  const h2hGames=g.h2h_games||0;
+  const h2hTrend=g.h2h_trend||'';
+  const h2hSrcIcon=g.h2h_source==='sheets'?'📊 Cached':g.h2h_source==='api'?'📡 Live':'';
+  const h2hBlock=hasH2H?`<div class="h2h-info">
+    <span class="h2h-avg">H2H Ø ${h2hAvgVal}</span>
+    <span class="h2h-meta">(${h2hGames} Spiele | Last 5: ${h2hLast5}${h2hTrend?' · '+h2hTrend:''})</span>
+    ${h2hSrcIcon?`<span class="h2h-source">${h2hSrcIcon}</span>`:''}
+  </div>`:'';
+  const h2hPrefill=hasH2H?`value="${g.h2h_avg.toFixed(1)}"`:'';
   return `<div class="game-card" id="gc-${g.id}" onclick="selectCard(${g.id})">
     <div class="card-stripe"></div>
     <div class="card-body">
@@ -392,7 +669,8 @@ function gameCard(g){
       </div>
     </div>
     <div class="card-inputs" id="ci-${g.id}">
-      <div class="inp-group"><label>H2H Ø</label><input type="number" id="ih2h-${g.id}" placeholder="96.5" step="0.5" inputmode="decimal"></div>
+      ${h2hBlock}
+      <div class="inp-group"><label>H2H Ø</label><input type="number" id="ih2h-${g.id}" placeholder="96.5" step="0.5" inputmode="decimal" ${h2hPrefill}></div>
       <div class="inp-group"><label>Bookie Line</label><input type="number" id="iline-${g.id}" placeholder="91.5" step="0.5" inputmode="decimal"></div>
       <div class="inp-group"><label>Fouls</label><input type="number" id="ifouls-${g.id}" placeholder="5" min="0" inputmode="numeric"></div>
       <button class="calc-mini" onclick="event.stopPropagation();calcCard(${g.id},${g.q1_total},${g.q2_live||0},${timer})">▶ SIGNAL</button>
@@ -532,7 +810,8 @@ async def root():
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "api_key_set": bool(API_KEY)}
+    sheets_ok = bool(GOOGLE_SHEETS_ID and GOOGLE_CREDENTIALS_JSON)
+    return {"status": "ok", "api_key_set": bool(API_KEY), "sheets_configured": sheets_ok}
 
 @app.get("/api/leagues")
 async def get_leagues():
@@ -543,7 +822,6 @@ async def get_live_games():
     if not API_KEY:
         return {"games": _demo_games(), "today": _demo_today(), "source": "demo", "count": 3}
 
-    from datetime import date
     today_str = date.today().isoformat()
     live_results, today_results, seen_ids = [], [], set()
 
@@ -575,6 +853,63 @@ async def get_live_games():
 
     return {"games": live_results, "today": today_results[:30], "source": "live", "count": len(live_results)}
 
+
+@app.get("/api/live/screened")
+async def get_live_games_screened():
+    """Live games enriched with H2H data from Sheets (or API fallback)."""
+    if not API_KEY:
+        games = _demo_games()
+        # Attach mock H2H to demo games
+        for g in games:
+            g["h2h_avg"] = None
+            g["h2h_last_5"] = None
+            g["h2h_games"] = 0
+            g["h2h_trend"] = ""
+            g["h2h_source"] = "demo"
+        return {"games": games, "source": "demo", "count": len(games)}
+
+    today_str = date.today().isoformat()
+    live_results, seen_ids = [], set()
+
+    for league_id, (name, season) in LEAGUES.items():
+        try:
+            data = await api_get("games", {"league": league_id, "season": season, "live": "all"})
+            for g in (data.get("response") or []):
+                gid = g.get("id")
+                if gid in seen_ids:
+                    continue
+                seen_ids.add(gid)
+                status = g.get("status", {}).get("short", "")
+                if status not in ("HT", "Q2"):
+                    continue
+                ng = _normalize_game(g, league_id, name)
+                home_id = g.get("teams", {}).get("home", {}).get("id")
+                away_id = g.get("teams", {}).get("away", {}).get("id")
+                # Try to get H2H from Sheets first
+                h2h = get_h2h_from_sheets(home_id, away_id, league_id) if home_id and away_id else None
+                # Fallback: calculate from API (and cache it)
+                if not h2h and home_id and away_id:
+                    h2h = await calculate_h2h_average(home_id, away_id, league_id, season)
+                    if h2h:
+                        write_h2h_to_sheets(home_id, away_id, league_id, h2h)
+                ng["h2h_avg"] = h2h["h2h_avg"] if h2h else None
+                ng["h2h_last_5"] = h2h["h2h_last_5"] if h2h else None
+                ng["h2h_games"] = h2h["h2h_games"] if h2h else 0
+                ng["h2h_trend"] = h2h.get("trend", "") if h2h else ""
+                ng["h2h_source"] = h2h.get("source", "") if h2h else "none"
+                live_results.append(ng)
+        except Exception:
+            continue
+
+    return {"games": live_results, "source": "live", "count": len(live_results)}
+
+
+@app.post("/api/h2h/refresh")
+async def trigger_h2h_refresh():
+    """Manually trigger an H2H cache refresh (runs in background)."""
+    asyncio.create_task(refresh_h2h_cache())
+    return {"status": "refresh started", "message": "H2H cache refresh running in background"}
+
 @app.get("/api/games")
 async def get_games(league: int, season: str = "2025-2026", date: Optional[str] = None):
     if not API_KEY:
@@ -604,7 +939,9 @@ def _normalize_game(g: dict, league_id: int, league_name: str) -> dict:
         "status": g.get("status", {}).get("short", ""),
         "timer": g.get("status", {}).get("timer"),
         "home": g.get("teams", {}).get("home", {}).get("name", "Home"),
+        "home_id": g.get("teams", {}).get("home", {}).get("id"),
         "away": g.get("teams", {}).get("away", {}).get("name", "Away"),
+        "away_id": g.get("teams", {}).get("away", {}).get("id"),
         "q1_home": q1h, "q1_away": q1a,
         "q2_home": q2h, "q2_away": q2a,
         "total_home": total_h, "total_away": total_a,
