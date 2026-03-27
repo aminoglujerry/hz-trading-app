@@ -197,6 +197,85 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;min-
   .main{grid-template-columns:1fr;}
   .panel{border-right:none;border-bottom:1px solid var(--border);}
 }
+
+/* ─── TABS ───────────────────────────── */
+.tab-nav{display:flex;border-bottom:1px solid var(--border);background:var(--s1);}
+.tab-btn{background:none;border:none;border-bottom:2px solid transparent;color:var(--dim2);font-family:'Barlow',sans-serif;font-size:9px;letter-spacing:2px;text-transform:uppercase;padding:10px 18px;cursor:pointer;transition:all .15s;}
+.tab-btn.active{color:var(--white);border-bottom-color:var(--green);}
+.tab-btn:hover:not(.active){color:var(--text);}
+
+/* ─── DASHBOARD ──────────────────────── */
+.dash{padding:14px;}
+.dash-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;}
+.dash-title{font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--dim);}
+.dash-info{font-size:9px;color:var(--dim2);}
+.count-badge{background:var(--green);color:var(--bg);font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;padding:1px 8px;display:inline-block;margin-left:5px;}
+
+/* Alert Cards */
+.alerts-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:10px;margin-bottom:20px;}
+.alert-card{background:var(--s2);border:1px solid var(--border);animation:fadeIn .3s ease;}
+.alert-card.under{border-color:rgba(0,180,216,.4);box-shadow:0 0 16px rgba(0,180,216,.07);}
+.alert-card.over{border-color:rgba(230,57,70,.4);box-shadow:0 0 16px rgba(230,57,70,.07);}
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+.alert-top{padding:10px 12px 8px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:8px;}
+.alert-game-info{display:flex;flex-direction:column;gap:2px;min-width:0;}
+.alert-league{font-size:8px;letter-spacing:1.5px;text-transform:uppercase;color:var(--dim2);}
+.alert-teams{font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:700;color:var(--white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.alert-score{font-size:10px;color:var(--gold);}
+.alert-conf{display:flex;flex-direction:column;align-items:flex-end;gap:1px;flex-shrink:0;}
+.conf-pct{font-family:'Barlow Condensed',sans-serif;font-size:28px;font-weight:900;line-height:1;}
+.conf-pct.high{color:var(--green);}
+.conf-pct.med{color:var(--gold);}
+.conf-pct.low{color:var(--dim2);}
+.conf-label{font-size:7px;letter-spacing:1.5px;text-transform:uppercase;color:var(--dim);}
+.alert-signals{padding:8px 12px;display:flex;flex-direction:column;gap:6px;}
+.signal-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.sig-badge{font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:700;letter-spacing:2px;padding:2px 6px;border:1px solid;}
+.sig-badge.under{color:var(--under);border-color:rgba(0,180,216,.4);}
+.sig-badge.over{color:var(--over);border-color:rgba(230,57,70,.4);}
+.sig-badge.watch{color:var(--gold);border-color:rgba(244,162,97,.4);}
+.sig-badge.skip{color:var(--dim);border-color:var(--border);}
+.sig-tag{font-size:8px;letter-spacing:1px;text-transform:uppercase;color:var(--dim);padding:2px 5px;border:1px solid var(--border);flex-shrink:0;}
+.sig-meta{font-size:9px;color:var(--dim2);}
+.alert-skip-row{padding:6px 12px;background:rgba(230,57,70,.04);border-top:1px solid rgba(230,57,70,.15);font-size:9px;color:var(--over);}
+.alert-actions{padding:8px 12px;border-top:1px solid var(--border);display:flex;gap:6px;}
+.btn-book{flex:1;background:var(--green);border:none;color:var(--bg);font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:900;letter-spacing:2px;padding:7px;cursor:pointer;text-transform:uppercase;}
+.btn-book:hover{background:#35d460;}
+.no-alerts{text-align:center;padding:32px 14px;color:var(--dim);border:1px dashed var(--border);font-size:10px;line-height:2.5;}
+
+/* Filter Bar */
+.filter-bar{display:flex;gap:4px;flex-wrap:wrap;}
+.filter-btn{background:none;border:1px solid var(--border2);color:var(--dim2);font-family:'Barlow',sans-serif;font-size:8px;letter-spacing:1.5px;text-transform:uppercase;padding:5px 12px;cursor:pointer;transition:all .15s;}
+.filter-btn:hover{border-color:var(--dim);color:var(--text);}
+.filter-btn.active{background:var(--border2);color:var(--white);border-color:var(--dim);}
+
+/* Games Table */
+.gt-wrap{overflow-x:auto;margin-top:8px;}
+table.gt{width:100%;border-collapse:collapse;font-size:9px;}
+table.gt th{font-size:7px;letter-spacing:1.5px;text-transform:uppercase;color:var(--dim);padding:6px 8px;border-bottom:1px solid var(--border);white-space:nowrap;text-align:left;}
+table.gt td{padding:5px 8px;border-bottom:1px solid var(--border);color:var(--text);white-space:nowrap;vertical-align:middle;}
+table.gt tr:hover td{background:var(--s1);}
+table.gt tr.is-alert td:first-child{border-left:2px solid var(--green);}
+.td-under{color:var(--under);font-weight:700;}
+.td-over{color:var(--over);font-weight:700;}
+.td-watch{color:var(--gold);}
+.td-skip{color:var(--dim);}
+.td-conf{font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;}
+.td-conf.high{color:var(--green);}
+.td-conf.med{color:var(--gold);}
+.td-conf.low{color:var(--dim2);}
+.td-st{font-size:8px;padding:2px 5px;border:1px solid;}
+.td-st.live{color:var(--gold);border-color:rgba(244,162,97,.3);}
+.td-st.ht{color:var(--green);border-color:rgba(45,198,83,.3);}
+.td-st.ns{color:var(--dim);border-color:var(--border);}
+.td-st.ft{color:var(--dim2);border-color:var(--border);}
+.td-act{cursor:pointer;color:var(--green);font-size:11px;text-align:center;}
+.td-act:hover{color:var(--white);}
+
+@media(max-width:700px){
+  .alerts-grid{grid-template-columns:1fr;}
+  .gt-wrap{font-size:8px;}
+}
 </style>
 </head>
 <body>
@@ -209,7 +288,12 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;min-
     <button class="icon-btn" id="refreshBtn" onclick="loadLive()">⟳ LIVE</button>
   </div>
 </div>
+<div class="tab-nav">
+  <button class="tab-btn active" id="tabBtnHz" onclick="showTab('hz')">⚡ HZ CLASSIC</button>
+  <button class="tab-btn" id="tabBtnDash" onclick="showTab('dash')">📊 LIVE DASHBOARD</button>
+</div>
 
+<div id="viewHz">
 <!-- SIGNAL always visible -->
 <div class="signal-bar" id="signalBar">
   <div class="sig-main" id="sigMain">
@@ -278,6 +362,46 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;min-
       <div class="empty" style="font-size:10px">Klicke LIVE — zeigt alle heutigen Spiele mit Stats</div>
     </div>
   </div>
+</div>
+
+</div><!-- end #viewHz -->
+
+<div id="viewDash" style="display:none;">
+<div class="dash">
+  <div class="dash-header">
+    <div>
+      <span class="dash-title">🔴 Alerts</span>
+      <span class="count-badge" id="alertCount">0</span>
+    </div>
+    <span class="dash-info" id="dashTs">—</span>
+  </div>
+  <div class="alerts-grid" id="alertsGrid">
+    <div class="no-alerts">📊 Dashboard lädt…<br><span style="font-size:9px">Klicke auf LIVE DASHBOARD um zu starten</span></div>
+  </div>
+
+  <div class="dash-header" style="margin-top:4px;">
+    <span class="dash-title">Alle Spiele</span>
+    <div class="filter-bar" id="filterBar">
+      <button class="filter-btn active" onclick="setFilter(this,'all')">ALLE</button>
+      <button class="filter-btn" onclick="setFilter(this,'hz')">HZ-SIGNALE</button>
+      <button class="filter-btn" onclick="setFilter(this,'ft')">FT-SIGNALE</button>
+      <button class="filter-btn" onclick="setFilter(this,'alerts')">ALERTS</button>
+      <button class="filter-btn" onclick="setFilter(this,'skip')">SKIPPED</button>
+    </div>
+  </div>
+  <div class="gt-wrap">
+    <table class="gt">
+      <thead><tr>
+        <th>Liga</th><th>Spiel</th><th>Status</th>
+        <th>Total</th><th>Lead</th><th>Pace</th>
+        <th>HZ Signal</th><th>FT Signal</th><th>Alert%</th><th>Skip?</th><th></th>
+      </tr></thead>
+      <tbody id="gamesTableBody">
+        <tr><td colspan="11" style="text-align:center;padding:20px;color:var(--dim)">Keine Spiele geladen</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
 </div>
 
 <script>
@@ -511,6 +635,148 @@ function updateTlStats(){
   const w=trades.filter(t=>t.result==='win').length,l=trades.filter(t=>t.result==='loss').length;
   document.getElementById('tlStats').textContent=`${w}W / ${l}L`;
 }
+
+// ─── TAB SWITCHING ────────────────────
+let currentTab='hz',dashInterval=null,currentFilter='all',allScreenedGames=[];
+function showTab(tab){
+  currentTab=tab;
+  document.getElementById('viewHz').style.display=tab==='hz'?'':'none';
+  document.getElementById('viewDash').style.display=tab==='dash'?'':'none';
+  document.getElementById('tabBtnHz').classList.toggle('active',tab==='hz');
+  document.getElementById('tabBtnDash').classList.toggle('active',tab==='dash');
+  if(tab==='dash'){
+    loadScreened();
+    if(!dashInterval)dashInterval=setInterval(loadScreened,30000);
+  }else{
+    if(dashInterval){clearInterval(dashInterval);dashInterval=null;}
+  }
+}
+
+// ─── SCREENING DASHBOARD ─────────────
+async function loadScreened(){
+  try{
+    const r=await fetch('/api/live/screened');
+    const data=await r.json();
+    renderAlerts(data.alerts||[]);
+    allScreenedGames=data.all_games||[];
+    renderGameTable(allScreenedGames);
+    document.getElementById('alertCount').textContent=data.count_alerts||0;
+    const ts=data.timestamp?new Date(data.timestamp).toLocaleTimeString():'—';
+    document.getElementById('dashTs').textContent='⟳ '+ts+' · '+((data.all_games||[]).length)+' Spiele';
+    setLive(data.source==='live');
+  }catch(e){
+    document.getElementById('alertsGrid').innerHTML=`<div class="no-alerts">⚠ ${e.message}</div>`;
+  }
+}
+
+function renderAlerts(alerts){
+  const grid=document.getElementById('alertsGrid');
+  if(!alerts.length){
+    grid.innerHTML='<div class="no-alerts">Keine Alerts<br><span style="font-size:9px;color:var(--dim)">Alle Spiele werden automatisch gescreened — Alerts erscheinen sobald Signale erkannt werden</span></div>';
+    return;
+  }
+  grid.innerHTML=alerts.map((g,i)=>alertCard(g,i)).join('');
+}
+
+function alertCard(g,idx){
+  const hz=g.hz_result||{},ft=g.ft_result||{};
+  const conf=g.alert_level||0;
+  const confCls=conf>=70?'high':conf>=45?'med':'low';
+  const hzSig=hz.signal||'SKIP',ftSig=ft.signal||'SKIP';
+  const dirCls=hzSig==='UNDER'||ftSig==='UNDER'?'under':hzSig==='OVER'||ftSig==='OVER'?'over':'';
+  function sigRow(tag,res){
+    if(!res||res.signal==='SKIP')return'';
+    const sc=res.signal.toLowerCase();
+    let meta='';
+    if(res.buffer!=null)meta+=`Buffer ${res.buffer>=0?'+':''}${res.buffer} `;
+    if(res.time_left!=null)meta+=`${res.time_left}′ `;
+    if(res.pace!=null)meta+=`Pace ${res.pace}`;
+    return `<div class="signal-row">
+      <span class="sig-tag">${tag}</span>
+      <span class="sig-badge ${sc}">${res.signal}</span>
+      ${res.stufe&&res.stufe!=='C'?`<span class="sig-tag">STF ${res.stufe}</span>`:''}
+      ${meta?`<span class="sig-meta">${meta.trim()}</span>`:''}
+    </div>`;
+  }
+  return `<div class="alert-card ${dirCls}">
+    <div class="alert-top">
+      <div class="alert-game-info">
+        <span class="alert-league">${g.league_name} · ${g.status}${g.timer?' '+g.timer+'′':''}</span>
+        <span class="alert-teams" title="${g.home} vs ${g.away}">${g.home} vs ${g.away}</span>
+        <span class="alert-score">${g.total_home}–${g.total_away}${g.lead?' · Lead '+g.lead:''}</span>
+      </div>
+      <div class="alert-conf">
+        <span class="conf-pct ${confCls}">${conf}%</span>
+        <span class="conf-label">Alert</span>
+      </div>
+    </div>
+    <div class="alert-signals">
+      ${sigRow('HZ',hz)}
+      ${sigRow('FT',ft)}
+      ${hzSig==='SKIP'&&ftSig==='SKIP'?`<div class="signal-row"><span class="sig-badge skip">SKIP</span><span class="sig-meta">${hz.reason||ft.reason||'—'}</span></div>`:''}
+    </div>
+    ${g.skip_reason?`<div class="alert-skip-row">⊘ ${g.skip_reason}</div>`:''}
+    <div class="alert-actions">
+      <button class="btn-book" onclick="bookFromAlert(${g.id})">+ Trade buchen</button>
+    </div>
+  </div>`;
+}
+
+function setFilter(btn,f){
+  currentFilter=f;
+  document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  renderGameTable(allScreenedGames);
+}
+
+function renderGameTable(games){
+  const tbody=document.getElementById('gamesTableBody');
+  let filtered=games;
+  if(currentFilter==='hz')filtered=games.filter(g=>g.hz_result&&g.hz_result.signal&&g.hz_result.signal!=='SKIP');
+  else if(currentFilter==='ft')filtered=games.filter(g=>g.ft_result&&g.ft_result.signal&&g.ft_result.signal!=='SKIP');
+  else if(currentFilter==='alerts')filtered=games.filter(g=>g.is_alert);
+  else if(currentFilter==='skip')filtered=games.filter(g=>g.skip_reason);
+  if(!filtered.length){tbody.innerHTML='<tr><td colspan="11" style="text-align:center;padding:20px;color:var(--dim)">Keine Spiele in dieser Kategorie</td></tr>';return;}
+  tbody.innerHTML=filtered.map(g=>{
+    const hz=g.hz_result||{},ft=g.ft_result||{};
+    const conf=g.alert_level||0;
+    const confCls=conf>=70?'high':conf>=45?'med':'low';
+    function sigCls(s){return s==='UNDER'?'td-under':s==='OVER'?'td-over':s==='WATCH'?'td-watch':'td-skip';}
+    const stMap={HT:'ht',Q2:'live',Q3:'ht',Q4:'live',FT:'ft',NS:'ns'};
+    const stCls=stMap[g.status]||'ns';
+    return `<tr class="${g.is_alert?'is-alert':''}">
+      <td style="font-size:8px;color:var(--dim2);max-width:80px;overflow:hidden;text-overflow:ellipsis">${g.league_name}</td>
+      <td><span style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700">${g.home} vs ${g.away}</span></td>
+      <td><span class="td-st ${stCls}">${g.status}${g.timer?' '+g.timer+'′':''}</span></td>
+      <td style="font-family:'Barlow Condensed',sans-serif">${g.total_home}–${g.total_away}</td>
+      <td>${g.lead!=null?g.lead+' Pkt':'—'}</td>
+      <td>${g.pace||'—'}</td>
+      <td class="${sigCls(hz.signal)}">${hz.signal||'—'}</td>
+      <td class="${sigCls(ft.signal)}">${ft.signal||'—'}</td>
+      <td><span class="td-conf ${confCls}">${conf>0?conf+'%':'—'}</span></td>
+      <td style="font-size:8px;color:var(--over);max-width:120px;overflow:hidden;text-overflow:ellipsis">${g.skip_reason||''}</td>
+      <td class="td-act" onclick="bookFromAlert(${g.id})">+</td>
+    </tr>`;
+  }).join('');
+}
+
+function bookFromAlert(gameId){
+  const game=allScreenedGames.find(g=>g.id===gameId);
+  if(!game){alert('Spiel nicht gefunden');return;}
+  const hz=game.hz_result||{},ft=game.ft_result||{};
+  const sig=hz.signal&&hz.signal!=='SKIP'?hz:ft.signal&&ft.signal!=='SKIP'?ft:null;
+  if(!sig||sig.signal==='SKIP'){alert('Kein gültiges Signal für dieses Spiel!');return;}
+  const stufe=sig.stufe||'B';
+  const amt=bankroll<100?(stufe==='A'?5:2.5):bankroll*(stufe==='A'?0.05:0.025);
+  const dir=sig.signal;
+  const gameName=game.home+' vs '+game.away;
+  const engine=hz.signal&&hz.signal!=='SKIP'?'hz':'ft';
+  trades.unshift({id:Date.now(),game:gameName,dir,stufe,amt:amt.toFixed(2),result:'open',engine});
+  if(trades.length>100)trades.pop();
+  localStorage.setItem('hz_trades',JSON.stringify(trades));
+  renderTradeLog();
+  showTab('hz');
+}
 </script>
 </body>
 </html>"""
@@ -541,7 +807,9 @@ async def get_leagues():
 @app.get("/api/live")
 async def get_live_games():
     if not API_KEY:
-        return {"games": _demo_games(), "today": _demo_today(), "source": "demo", "count": 3}
+        demo_live = [g for g in _demo_games() if g["status"] in ("HT", "Q2")]
+        demo_today = [g for g in _demo_games() if g["status"] not in ("HT", "Q2")] + _demo_today()
+        return {"games": demo_live, "today": demo_today, "source": "demo", "count": len(demo_live)}
 
     from datetime import date
     today_str = date.today().isoformat()
@@ -587,6 +855,213 @@ async def get_games(league: int, season: str = "2025-2026", date: Optional[str] 
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
+# ─── Screening Constants ───────────────────────────────────────────────────
+QUARTER_DURATION = 10.0          # minutes per quarter
+HZ_MIN_ENTRY_TIME = 2.5          # minimum time remaining in Q2 for HZ entry
+HZ_ENTRY_PRIME = 3.5             # prime entry window threshold
+HZ_UNDER_MIN_BUFFER = 5.0        # projection must be ≥5 pts above line for UNDER
+HZ_OVER_MAX_BUFFER = -3.0        # projection must be ≤-3 pts below line for OVER
+HZ_MAX_FOULS_FOR_UNDER = 8       # fouls below this allow UNDER; above → possible catalyst
+FT_OVER_MAX_BUFFER = -8.0        # projection ≥8 pts under line → OVER signal
+FT_UNDER_MIN_BUFFER = 10.0       # projection ≥10 pts over line → UNDER signal
+LOW_PACE_THRESHOLD = 5.0         # pts/min pace below which UNDER is favoured
+FT_MIN_FOULS_FOR_OVER = 25       # fouls required to trigger OVER
+FT_MIN_FT_PCT = 75.0             # minimum FT% for both teams for OVER
+FT_HIGH_FT_PCT = 80.0            # Stufe A FT% threshold
+BLOWOUT_LEAD = 20                # lead ≥ this → skip regardless of signal
+FT_LATE_ENTRY_MINUTE = 37        # Q4 minute after which entry is too late (timer ≥ 7)
+# ──────────────────────────────────────────────────────────────────────────
+
+def check_skip_conditions(game: dict):
+    """Universal skip checks. Returns a skip reason string or None."""
+    lead = game.get("lead") or 0
+    if lead >= BLOWOUT_LEAD:
+        return f"Lead {lead} Pkt ≥ {BLOWOUT_LEAD}"
+    return None
+
+
+def check_hz_rules(game: dict) -> dict:
+    """Check HZ (Halftime) signal. Returns dict with signal/stufe/confidence/reason."""
+    status = game.get("status", "")
+    if status not in ("HT", "Q2"):
+        return {"signal": "SKIP", "stufe": "C", "confidence": 0, "reason": "Nicht HT/Q2"}
+    skip = check_skip_conditions(game)
+    if skip:
+        return {"signal": "SKIP", "stufe": "C", "confidence": 0, "reason": skip}
+    timer = game.get("timer") or 0
+    time_left = max(0.0, QUARTER_DURATION - timer) if status == "Q2" else QUARTER_DURATION
+    if time_left < HZ_MIN_ENTRY_TIME:
+        return {"signal": "SKIP", "stufe": "C", "confidence": 0,
+                "reason": f"Entry {time_left:.1f}′ zu spät"}
+    q1_total = game.get("q1_total") or 0
+    q2_live = game.get("q2_live") or 0
+    fouls = game.get("fouls_total") or 0
+    bookie_line = game.get("bookie_line")
+    if status == "Q2" and timer > 0.5 and q2_live > 0:
+        q2_proj = q2_live + (q2_live / timer) * time_left
+    else:
+        q2_proj = float(q1_total)
+    proj = float(q1_total) + q2_proj
+    if not bookie_line:
+        confidence = 25 + (15 if time_left >= HZ_ENTRY_PRIME else 0)
+        return {"signal": "WATCH", "stufe": "B", "confidence": confidence,
+                "proj": round(proj, 1), "time_left": round(time_left, 1),
+                "reason": "Bookie-Linie fehlt"}
+    buffer = proj - bookie_line
+    if buffer >= HZ_UNDER_MIN_BUFFER and fouls < HZ_MAX_FOULS_FOR_UNDER:
+        confidence = min(92, 50 + int(buffer * 4) + (10 if time_left >= HZ_ENTRY_PRIME else 0))
+        stufe = "A" if time_left >= HZ_ENTRY_PRIME else "B"
+        return {"signal": "UNDER", "stufe": stufe, "confidence": confidence,
+                "proj": round(proj, 1), "buffer": round(buffer, 1),
+                "time_left": round(time_left, 1), "reason": None}
+    if buffer <= HZ_OVER_MAX_BUFFER:
+        over_cat = fouls >= HZ_MAX_FOULS_FOR_UNDER
+        confidence = min(92, 45 + int(abs(buffer) * 4) + (15 if over_cat else 0))
+        stufe = "A" if over_cat else "B"
+        return {"signal": "OVER", "stufe": stufe, "confidence": confidence,
+                "proj": round(proj, 1), "buffer": round(buffer, 1),
+                "time_left": round(time_left, 1), "reason": None}
+    return {"signal": "SKIP", "stufe": "C", "confidence": 0,
+            "proj": round(proj, 1), "buffer": round(buffer, 1),
+            "reason": f"Buffer {buffer:+.1f} zu klein", "time_left": round(time_left, 1)}
+
+
+def check_ft_rules(game: dict) -> dict:
+    """Check FT-Total signal (Q3/Q4 break). Returns dict with signal/stufe/confidence/reason."""
+    status = game.get("status", "")
+    if status not in ("Q3", "Q4"):
+        return {"signal": "SKIP", "stufe": "C", "confidence": 0, "reason": "Nicht Q3/Q4"}
+    timer = game.get("timer") or 0
+    # After minute 37 means 7+ minutes into Q4 (30 + 7 = 37)
+    if status == "Q4" and timer >= (FT_LATE_ENTRY_MINUTE - 30):
+        return {"signal": "SKIP", "stufe": "C", "confidence": 0,
+                "reason": f"Nach Minute {int(30 + timer)}"}
+    skip = check_skip_conditions(game)
+    if skip:
+        return {"signal": "SKIP", "stufe": "C", "confidence": 0, "reason": skip}
+    total_now = (game.get("total_home") or 0) + (game.get("total_away") or 0)
+    if status == "Q3":
+        mins_played = 2 * QUARTER_DURATION + timer
+        time_remaining = (QUARTER_DURATION - timer) + QUARTER_DURATION
+    else:
+        mins_played = 3 * QUARTER_DURATION + timer
+        time_remaining = max(0.0, QUARTER_DURATION - timer)
+    pace = game.get("pace") or 0
+    if not pace and mins_played > 0:
+        pace = total_now / mins_played
+    proj_ft = round(total_now + pace * time_remaining, 1) if pace > 0 else 0
+    bookie_line = game.get("bookie_line")
+    ft_home = game.get("ft_home")
+    ft_away = game.get("ft_away")
+    fouls = game.get("fouls_total") or 0
+    if not bookie_line:
+        confidence = 25 + (15 if status == "Q3" else 0)
+        return {"signal": "WATCH", "stufe": "B", "confidence": confidence,
+                "proj": proj_ft, "pace": round(pace, 1), "reason": "Bookie-Linie fehlt"}
+    buffer = proj_ft - bookie_line
+    lead = game.get("lead") or 0
+    if lead >= BLOWOUT_LEAD:
+        return {"signal": "SKIP", "stufe": "C", "confidence": 0,
+                "reason": f"Lead {lead} ≥ {BLOWOUT_LEAD}"}
+    ft_both_75 = bool(ft_home and ft_away and ft_home >= FT_MIN_FT_PCT and ft_away >= FT_MIN_FT_PCT)
+    ft_both_80 = bool(ft_home and ft_away and ft_home >= FT_HIGH_FT_PCT and ft_away >= FT_HIGH_FT_PCT)
+    ft_one_low = bool((ft_home and ft_home < FT_MIN_FT_PCT) or (ft_away and ft_away < FT_MIN_FT_PCT))
+    # OVER signal: projection is 8+ under bookie line → expect score to go over
+    if buffer <= FT_OVER_MAX_BUFFER:
+        if ft_one_low:
+            return {"signal": "SKIP", "stufe": "C", "confidence": 0,
+                    "reason": f"FT% < {FT_MIN_FT_PCT:.0f}%"}
+        if fouls > 0 and fouls < FT_MIN_FOULS_FOR_OVER:
+            return {"signal": "SKIP", "stufe": "C", "confidence": 0,
+                    "reason": f"Fouls {fouls} < {FT_MIN_FOULS_FOR_OVER}"}
+        confidence = min(92, 50 + int(abs(buffer) * 3))
+        if ft_both_80 and abs(buffer) >= 10:
+            stufe = "A"
+            confidence = min(95, confidence + 15)
+        elif ft_both_75:
+            stufe = "B"
+        else:
+            stufe = "B"
+        return {"signal": "OVER", "stufe": stufe, "confidence": confidence,
+                "proj": proj_ft, "buffer": round(buffer, 1),
+                "pace": round(pace, 1), "reason": None}
+    # UNDER signal: projection is FT_UNDER_MIN_BUFFER+ over bookie line + low pace
+    if buffer >= FT_UNDER_MIN_BUFFER:
+        low_pace = pace < LOW_PACE_THRESHOLD
+        if low_pace:
+            confidence = min(92, 50 + int(buffer * 2.5))
+            stufe = "A" if buffer >= FT_UNDER_MIN_BUFFER * 1.2 else "B"
+            return {"signal": "UNDER", "stufe": stufe, "confidence": confidence,
+                    "proj": proj_ft, "buffer": round(buffer, 1),
+                    "pace": round(pace, 1), "reason": None}
+    return {"signal": "SKIP", "stufe": "C", "confidence": 0,
+            "proj": proj_ft, "buffer": round(buffer, 1),
+            "pace": round(pace, 1), "reason": f"Buffer {buffer:+.1f} kein Signal"}
+
+
+def calculate_alert_level(hz_result: dict, ft_result: dict) -> int:
+    """Return 0-100 alert confidence based on both signals."""
+    hz_conf = hz_result.get("confidence", 0) if hz_result.get("signal") not in ("SKIP", None) else 0
+    ft_conf = ft_result.get("confidence", 0) if ft_result.get("signal") not in ("SKIP", None) else 0
+    return min(100, max(hz_conf, ft_conf))
+
+
+def screen_all_games(games: list) -> list:
+    """Apply screening rules to all games and annotate with signal info."""
+    result = []
+    for game in games:
+        skip_reason = check_skip_conditions(game)
+        hz_result = check_hz_rules(game)
+        ft_result = check_ft_rules(game)
+        alert_level = calculate_alert_level(hz_result, ft_result)
+        hz_sig = hz_result.get("signal", "SKIP")
+        ft_sig = ft_result.get("signal", "SKIP")
+        is_alert = (
+            (hz_sig not in ("SKIP", "WATCH") or ft_sig not in ("SKIP", "WATCH"))
+            and skip_reason is None
+            and alert_level >= 40
+        )
+        result.append({
+            **game,
+            "hz_result": hz_result,
+            "ft_result": ft_result,
+            "skip_reason": skip_reason,
+            "alert_level": alert_level,
+            "is_alert": is_alert,
+        })
+    return result
+
+
+@app.get("/api/live/screened")
+async def get_screened_games():
+    """Return all live games with screening signals plus top-10 alerts."""
+    from datetime import datetime, timezone
+    timestamp = datetime.now(timezone.utc).isoformat()
+    if not API_KEY:
+        all_demo = _demo_games() + _demo_today()
+        screened = screen_all_games(all_demo)
+        alerts = sorted([g for g in screened if g["is_alert"]], key=lambda x: -x["alert_level"])[:10]
+        return {"alerts": alerts, "all_games": screened,
+                "count_alerts": len(alerts), "timestamp": timestamp, "source": "demo"}
+    all_games: list = []
+    seen_ids: set = set()
+    for league_id, (name, season) in LEAGUES.items():
+        try:
+            data = await api_get("games", {"league": league_id, "season": season, "live": "all"})
+            for g in (data.get("response") or []):
+                gid = g.get("id")
+                if gid in seen_ids:
+                    continue
+                seen_ids.add(gid)
+                all_games.append(_normalize_game(g, league_id, name))
+        except Exception:
+            continue
+    screened = screen_all_games(all_games)
+    alerts = sorted([g for g in screened if g["is_alert"]], key=lambda x: -x["alert_level"])[:10]
+    return {"alerts": alerts, "all_games": screened,
+            "count_alerts": len(alerts), "timestamp": timestamp, "source": "live"}
+
+
 def _normalize_game(g: dict, league_id: int, league_name: str) -> dict:
     scores = g.get("scores", {})
     home_s = scores.get("home", {})
@@ -595,48 +1070,119 @@ def _normalize_game(g: dict, league_id: int, league_name: str) -> dict:
     q1a = away_s.get("quarter_1") or 0
     q2h = home_s.get("quarter_2") or 0
     q2a = away_s.get("quarter_2") or 0
+    q3h = home_s.get("quarter_3") or 0
+    q3a = away_s.get("quarter_3") or 0
+    q4h = home_s.get("quarter_4") or 0
+    q4a = away_s.get("quarter_4") or 0
     total_h = home_s.get("total") or 0
     total_a = away_s.get("total") or 0
+    status = g.get("status", {}).get("short", "")
+    timer_val = g.get("status", {}).get("timer")
+    timer = timer_val or 0
+    # Minutes played for pace calculation
+    _mins_map = {"Q1": timer, "Q2": 10.0 + timer, "HT": 20.0,
+                 "Q3": 20.0 + timer, "Q4": 30.0 + timer, "FT": 40.0, "AOT": 45.0}
+    mins_played = _mins_map.get(status, 0) or 0
+    total_pts = total_h + total_a
+    pace = round(total_pts / mins_played, 1) if mins_played > 0 else 0
+    lead = abs(total_h - total_a)
+    venue = g.get("venue") or {}
     return {
         "id": g.get("id"),
         "league_id": league_id,
         "league_name": g.get("league", {}).get("name", league_name),
-        "status": g.get("status", {}).get("short", ""),
-        "timer": g.get("status", {}).get("timer"),
+        "status": status,
+        "phase": status,
+        "timer": timer_val,
         "home": g.get("teams", {}).get("home", {}).get("name", "Home"),
         "away": g.get("teams", {}).get("away", {}).get("name", "Away"),
         "q1_home": q1h, "q1_away": q1a,
         "q2_home": q2h, "q2_away": q2a,
+        "q3_home": q3h, "q3_away": q3a,
+        "q4_home": q4h, "q4_away": q4a,
         "total_home": total_h, "total_away": total_a,
         "q1_total": q1h + q1a,
         "q2_live": q2h + q2a,
+        "q3_total": q3h + q3a,
+        "q4_total": q4h + q4a,
         "ht_total": total_h + total_a,
+        "lead": lead,
+        "lead_home": total_h - total_a,
+        "pace": pace,
+        "venue_name": venue.get("name", ""),
+        "venue_city": venue.get("city", ""),
+        "fouls_home": 0,
+        "fouls_away": 0,
+        "fouls_total": 0,
+        "ft_home": None,
+        "ft_away": None,
+        "h2h_avg": None,
+        "bookie_line": None,
     }
 
 def _demo_games():
     return [
-        {"id": 1001, "league_id": 4, "league_name": "ACB", "status": "HT", "timer": None,
+        {"id": 1001, "league_id": 4, "league_name": "ACB", "status": "HT", "timer": None, "phase": "HT",
          "home": "Real Madrid", "away": "FC Barcelona",
-         "q1_home": 28, "q1_away": 24, "q2_home": 0, "q2_away": 0,
-         "total_home": 28, "total_away": 24, "q1_total": 52, "q2_live": 0, "ht_total": 52},
-        {"id": 1002, "league_id": 120, "league_name": "TBL", "status": "Q2", "timer": 5,
+         "q1_home": 28, "q1_away": 24, "q2_home": 22, "q2_away": 20,
+         "q3_home": 0, "q3_away": 0, "q4_home": 0, "q4_away": 0,
+         "total_home": 50, "total_away": 44, "q1_total": 52, "q2_live": 42,
+         "q3_total": 0, "q4_total": 0, "ht_total": 94,
+         "lead": 6, "lead_home": 6, "pace": 4.7,
+         "venue_name": "WiZink Center", "venue_city": "Madrid",
+         "fouls_home": 5, "fouls_away": 4, "fouls_total": 9,
+         "ft_home": None, "ft_away": None, "h2h_avg": None, "bookie_line": None},
+        {"id": 1002, "league_id": 120, "league_name": "TBL", "status": "Q2", "timer": 5, "phase": "Q2",
          "home": "Fenerbahce", "away": "Galatasaray",
          "q1_home": 31, "q1_away": 27, "q2_home": 18, "q2_away": 14,
-         "total_home": 49, "total_away": 41, "q1_total": 58, "q2_live": 32, "ht_total": 90},
-        {"id": 1003, "league_id": 6, "league_name": "ABA Liga", "status": "HT", "timer": None,
+         "q3_home": 0, "q3_away": 0, "q4_home": 0, "q4_away": 0,
+         "total_home": 49, "total_away": 41, "q1_total": 58, "q2_live": 32,
+         "q3_total": 0, "q4_total": 0, "ht_total": 90,
+         "lead": 8, "lead_home": 8, "pace": 6.0,
+         "venue_name": "Ulker Sports Arena", "venue_city": "Istanbul",
+         "fouls_home": 4, "fouls_away": 5, "fouls_total": 9,
+         "ft_home": None, "ft_away": None, "h2h_avg": None, "bookie_line": None},
+        {"id": 1003, "league_id": 6, "league_name": "ABA Liga", "status": "Q3", "timer": 6, "phase": "Q3",
          "home": "Crvena zvezda", "away": "Partizan",
-         "q1_home": 22, "q1_away": 26, "q2_home": 0, "q2_away": 0,
-         "total_home": 22, "total_away": 26, "q1_total": 48, "q2_live": 0, "ht_total": 48},
+         "q1_home": 22, "q1_away": 26, "q2_home": 25, "q2_away": 21,
+         "q3_home": 16, "q3_away": 14, "q4_home": 0, "q4_away": 0,
+         "total_home": 63, "total_away": 61, "q1_total": 48, "q2_live": 46,
+         "q3_total": 30, "q4_total": 0, "ht_total": 94,
+         "lead": 2, "lead_home": 2, "pace": 4.8,
+         "venue_name": "Stark Arena", "venue_city": "Beograd",
+         "fouls_home": 14, "fouls_away": 13, "fouls_total": 27,
+         "ft_home": 82.0, "ft_away": 78.0, "h2h_avg": None, "bookie_line": 155.5},
+        {"id": 1004, "league_id": 3, "league_name": "EuroLeague", "status": "Q4", "timer": 4, "phase": "Q4",
+         "home": "Anadolu Efes", "away": "CSKA Moscow",
+         "q1_home": 24, "q1_away": 22, "q2_home": 19, "q2_away": 23,
+         "q3_home": 21, "q3_away": 18, "q4_home": 12, "q4_away": 10,
+         "total_home": 76, "total_away": 73, "q1_total": 46, "q2_live": 42,
+         "q3_total": 39, "q4_total": 22, "ht_total": 88,
+         "lead": 3, "lead_home": 3, "pace": 4.4,
+         "venue_name": "Sinan Erdem Dome", "venue_city": "Istanbul",
+         "fouls_home": 18, "fouls_away": 16, "fouls_total": 34,
+         "ft_home": 85.0, "ft_away": 76.0, "h2h_avg": None, "bookie_line": 160.0},
     ]
 
 def _demo_today():
     return [
-        {"id": 2001, "league_id": 3, "league_name": "EuroLeague", "status": "FT", "timer": None,
+        {"id": 2001, "league_id": 3, "league_name": "EuroLeague", "status": "FT", "timer": None, "phase": "FT",
          "home": "Olympiacos", "away": "CSKA", "q1_home": 24, "q1_away": 22,
-         "q2_home": 18, "q2_away": 26, "total_home": 78, "total_away": 82,
-         "q1_total": 46, "q2_live": 44, "ht_total": 90},
-        {"id": 2002, "league_id": 8, "league_name": "Lega A", "status": "FT", "timer": None,
-         "home": "Olimpia Milano", "away": "Virtus Bologna", "q1_home": 26, "q1_away": 21,
-         "q2_home": 22, "q2_away": 24, "total_home": 88, "total_away": 79,
-         "q1_total": 47, "q2_live": 46, "ht_total": 93},
+         "q2_home": 18, "q2_away": 26, "q3_home": 20, "q3_away": 18,
+         "q4_home": 16, "q4_away": 16, "total_home": 78, "total_away": 82,
+         "q1_total": 46, "q2_live": 44, "q3_total": 38, "q4_total": 32, "ht_total": 90,
+         "lead": 4, "lead_home": -4, "pace": 4.0,
+         "venue_name": "Peace and Friendship Stadium", "venue_city": "Piraeus",
+         "fouls_home": 22, "fouls_away": 19, "fouls_total": 41,
+         "ft_home": 78.0, "ft_away": 81.0, "h2h_avg": None, "bookie_line": None},
+        {"id": 2002, "league_id": 8, "league_name": "Lega A", "status": "NS", "timer": None, "phase": "NS",
+         "home": "Olimpia Milano", "away": "Virtus Bologna",
+         "q1_home": 0, "q1_away": 0, "q2_home": 0, "q2_away": 0,
+         "q3_home": 0, "q3_away": 0, "q4_home": 0, "q4_away": 0,
+         "total_home": 0, "total_away": 0, "q1_total": 0, "q2_live": 0,
+         "q3_total": 0, "q4_total": 0, "ht_total": 0,
+         "lead": 0, "lead_home": 0, "pace": 0,
+         "venue_name": "Mediolanum Forum", "venue_city": "Milano",
+         "fouls_home": 0, "fouls_away": 0, "fouls_total": 0,
+         "ft_home": None, "ft_away": None, "h2h_avg": None, "bookie_line": None},
     ]
