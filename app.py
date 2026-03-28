@@ -1,7 +1,14 @@
+"""
+HZ / FT Trading — Basketball Live Signal Engine
+Optimised for Render Free Plan (512 MB RAM)
+"""
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+from collections import OrderedDict
+from time import time
 import asyncio
 import httpx
 import json
@@ -10,7 +17,15 @@ import os
 from typing import Optional
 from datetime import date as _date, timedelta
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+# ─── Logging ──────────────────────────────────────────────────────────────────
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(funcName)s] %(message)s",
+)
+log = logging.getLogger(__name__)
+
+# ─── Config ───────────────────────────────────────────────────────────────────
 
 API_KEY    = os.getenv("API_SPORTS_KEY", "")
 API_BASE   = "https://v1.basketball.api-sports.io"
@@ -19,65 +34,120 @@ SHEETS_ID  = os.getenv("GOOGLE_SHEETS_ID", "")
 SHEETS_TAB = os.getenv("GOOGLE_SHEETS_TAB", "h2h_2025_2026")
 CREDS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
 
-# Leagues — breit aufgestellt, API liefert was sie hat
-LEAGUES: dict = {
-    120: ("TBL",         "2025-2026"),
-    4:   ("ACB",         "2025-2026"),
-    6:   ("ABA Liga",    "2025-2026"),
-    23:  ("LNB Pro A",   "2025-2026"),
-    8:   ("Lega A",      "2025-2026"),
-    3:   ("EuroLeague",  "2025-2026"),
-    2:   ("EuroCup",     "2025-2026"),
-    15:  ("BBL",         "2025-2026"),
-    11:  ("GBL",         "2025-2026"),
-    22:  ("BCL",         "2025-2026"),
-    12:  ("NBA",         "2025"),
-    5:   ("VTB",         "2025-2026"),
-    16:  ("Jeep Elite",  "2025-2026"),
-    19:  ("NBB",         "2025-2026"),
-    38:  ("Sueper Lig",  "2025-2026"),
-    117: ("LNB Pro B",   "2025-2026"),
-    14:  ("BSL",         "2025-2026"),
-    17:  ("Korisliiga",  "2025-2026"),
-    18:  ("Korisliiga W","2025-2026"),
-    24:  ("Pro B",       "2025-2026"),
-    7:   ("Adriatic",    "2025-2026"),
-    9:   ("Lega A2",     "2025-2026"),
-    10:  ("A1 GR",       "2025-2026"),
-    13:  ("CBA",         "2025-2026"),
-    20:  ("Orlen BP",    "2025-2026"),
-    25:  ("NLA",         "2025-2026"),
-    29:  ("NBL",         "2025-2026"),
-    30:  ("Superliga",   "2025-2026"),
-    31:  ("Divizia A",   "2025-2026"),
-    32:  ("PBL",         "2025-2026"),
-    33:  ("LKL",         "2025-2026"),
-    34:  ("Premijer",    "2025-2026"),
-    36:  ("SBL",         "2025-2026"),
-    37:  ("Extraliga",   "2025-2026"),
-    40:  ("Superleague", "2025-2026"),
+# ─── Signal Engine Constants ──────────────────────────────────────────────────
+
+# HZ Engine
+HZ_BUFFER_UNDER       = 5      # min proj-vs-line buffer for UNDER signal
+HZ_BUFFER_OVER        = 3      # min proj-vs-line buffer (negative) for OVER signal
+HZ_ENTRY_MIN          = 2.5    # min Q2 time remaining (min) for any entry
+HZ_ENTRY_OPTIMAL      = 3.5    # Q2 time remaining for Stufe-A entry
+HZ_FOULS_THRESHOLD    = 8      # fouls at or above → OVER catalyst / blocks UNDER
+HZ_FT_PCT_CATALYST    = 85     # FT% at or above → OVER catalyst
+HZ_FG_SKIP            = 60     # FG% above this → skip UNDER
+HZ_H2H_OVER_BUFFER    = -3     # h2h_buf ≤ this → OVER H2H catalyst
+HZ_H2H_UNDER_KONTRA   = 0      # h2h_buf < this → kontra (Stufe B on UNDER)
+HZ_H2H_CONFIRM_BUFFER = 3      # h2h_buf ≥ this → strong confirmation on UNDER
+
+# FT Engine
+FT_BUFFER_UNDER_A     = 8      # min buffer for UNDER Stufe A (needs FT%)
+FT_BUFFER_UNDER_B     = 10     # min buffer for UNDER Stufe B (no FT% required)
+FT_BUFFER_OVER        = 8      # buffer ≤ −this → OVER signal
+FT_FT_PCT_THRESHOLD   = 75     # min FT% (both teams) for A-signal
+FT_GAP_MAX            = 20     # score gap above this → garbage-time skip
+FT_FOULS_CATALYST     = 10     # fouls ≥ this → OVER catalyst
+FT_H2H_CONFIRM_BUFFER = 5      # h2h_buf ≥ this → H2H confirmation on UNDER
+
+# ─── App Constants ────────────────────────────────────────────────────────────
+
+SEEN_FT_IDS_MAX       = 10_000  # FIFO cap for _seen_ft_ids (prevents unbounded growth)
+SCHEDULER_INTERVAL    = 1800    # seconds between background extract runs
+BACKFILL_SLEEP        = 0.5     # seconds between days in backfill loop
+BACKFILL_MAX_DAYS     = 14      # max days per backfill request
+GAME_STATS_CACHE_TTL  = 60      # seconds to cache /api/game-stats responses
+API_TIMEOUT           = 12      # httpx request timeout (seconds)
+TODAY_GAMES_LIMIT     = 40      # max games returned in today list
+LIVE_API_CONCURRENCY  = 8       # max simultaneous API-Sports calls
+SHEETS_ROWS_INIT      = 2000
+SHEETS_COLS_INIT      = 10
+
+SHEETS_HEADER = ["date", "home", "away", "league",
+                 "q1_total", "q2_total", "ht_total", "ft_total"]
+
+# ─── Leagues ──────────────────────────────────────────────────────────────────
+
+LEAGUES: dict[int, tuple[str, str]] = {
+    120: ("TBL",          "2025-2026"),
+    4:   ("ACB",          "2025-2026"),
+    6:   ("ABA Liga",     "2025-2026"),
+    23:  ("LNB Pro A",    "2025-2026"),
+    8:   ("Lega A",       "2025-2026"),
+    3:   ("EuroLeague",   "2025-2026"),
+    2:   ("EuroCup",      "2025-2026"),
+    15:  ("BBL",          "2025-2026"),
+    11:  ("GBL",          "2025-2026"),
+    22:  ("BCL",          "2025-2026"),
+    12:  ("NBA",          "2025"),
+    5:   ("VTB",          "2025-2026"),
+    16:  ("Jeep Elite",   "2025-2026"),
+    19:  ("NBB",          "2025-2026"),
+    38:  ("Sueper Lig",   "2025-2026"),
+    117: ("LNB Pro B",    "2025-2026"),
+    14:  ("BSL",          "2025-2026"),
+    17:  ("Korisliiga",   "2025-2026"),
+    18:  ("Korisliiga W", "2025-2026"),
+    24:  ("Pro B",        "2025-2026"),
+    7:   ("Adriatic",     "2025-2026"),
+    9:   ("Lega A2",      "2025-2026"),
+    10:  ("A1 GR",        "2025-2026"),
+    13:  ("CBA",          "2025-2026"),
+    20:  ("Orlen BP",     "2025-2026"),
+    25:  ("NLA",          "2025-2026"),
+    29:  ("NBL",          "2025-2026"),
+    30:  ("Superliga",    "2025-2026"),
+    31:  ("Divizia A",    "2025-2026"),
+    32:  ("PBL",          "2025-2026"),
+    33:  ("LKL",          "2025-2026"),
+    34:  ("Premijer",     "2025-2026"),
+    36:  ("SBL",          "2025-2026"),
+    37:  ("Extraliga",    "2025-2026"),
+    40:  ("Superleague",  "2025-2026"),
 }
 
-_h2h_cache:    dict = {}   # matchup_key -> [ht_total, ...]
-_ft_h2h_cache: dict = {}   # matchup_key -> [ft_total, ...]
-_seen_ft_ids:  set  = set()
-_ws = None
+# ─── In-Memory State ──────────────────────────────────────────────────────────
+
+_h2h_cache:        dict        = {}           # matchup_key → [ht_total, …]
+_ft_h2h_cache:     dict        = {}           # matchup_key → [ft_total, …]
+_seen_ft_ids:      OrderedDict = OrderedDict() # FIFO set, capped at SEEN_FT_IDS_MAX
+_game_stats_cache: dict        = {}           # game_id → (timestamp, result)
+_ws                             = None         # gspread Worksheet (lazy init)
+_api_semaphore: Optional[asyncio.Semaphore]   = None  # init in lifespan
 
 
-# ─── lifespan ────────────────────────────────────────────────────────────────
+# ─── Lifespan ─────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app_: FastAPI):
+    global _api_semaphore
+    _api_semaphore = asyncio.Semaphore(LIVE_API_CONCURRENCY)
     task = asyncio.create_task(_scheduler_loop())
+    log.info("🚀 App started — scheduler interval: %ds, concurrency: %d",
+             SCHEDULER_INTERVAL, LIVE_API_CONCURRENCY)
     yield
     task.cancel()
     try:
         await task
     except asyncio.CancelledError:
         pass
+    log.info("App shutdown complete")
+
 
 app = FastAPI(title="HZ / FT Trading", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # ─── HTML ─────────────────────────────────────────────────────────────────────
@@ -176,7 +246,7 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;min-
 .checks-row{display:flex;gap:14px;margin-bottom:8px;flex-wrap:wrap;}
 .chk{display:flex;align-items:center;gap:5px;cursor:pointer;user-select:none;}
 .chk-box{width:14px;height:14px;border:1px solid var(--border2);background:var(--bg);
-  display:flex;align-items:center;justify-content:center;font-size:9px;}
+  display:flex;align-items:center;justify-content:font-size:9px;}
 .chk.on .chk-box{background:var(--over);border-color:var(--over);color:#fff;}
 .chk-lbl{font-size:10px;color:var(--dim2);}
 .chk.on .chk-lbl{color:var(--text);}
@@ -570,12 +640,10 @@ async function selectHzCard(id,home,away){
   document.querySelectorAll('.game-card').forEach(c=>{c.classList.remove('selected');const ci=c.querySelector('.card-inputs');if(ci)ci.classList.remove('open');});
   const card=document.getElementById('gc-'+id);
   if(card){card.classList.add('selected');document.getElementById('ci-'+id).classList.add('open');}
-  // Fetch H2H + live stats in parallel
   const [h2hRes, statsRes] = await Promise.allSettled([
     fetch(`/api/h2h?home=${encodeURIComponent(home)}&away=${encodeURIComponent(away)}`).then(r=>r.json()),
     fetch(`/api/game-stats/${id}`).then(r=>r.json()),
   ]);
-  // H2H
   try{
     const d=h2hRes.value;
     const note=document.getElementById('h2hn-'+id);
@@ -585,7 +653,6 @@ async function selectHzCard(id,home,away){
       if(inp&&!inp.value){inp.value=d.avg;document.getElementById('h2hlbl-'+id).textContent=`H2H Ø (${d.count}x)`;}
     }else{note.textContent='H2H: kein Eintrag';note.className='h2h-note';}
   }catch(e){document.getElementById('h2hn-'+id).textContent='H2H: Fehler';}
-  // Live stats — auto-fill fouls, FT%, FG%
   try{
     const s=statsRes.value;
     if(s.found){
@@ -595,7 +662,6 @@ async function selectHzCard(id,home,away){
       if(foulsInp&&!foulsInp.value&&s.total_fouls>0) foulsInp.value=s.total_fouls;
       if(ftInp&&!ftInp.value&&s.avg_ft_pct!=null) ftInp.value=s.avg_ft_pct;
       if(fgInp&&!fgInp.value&&s.avg_fg_pct!=null) fgInp.value=s.avg_fg_pct;
-      // Update stats note
       const note=document.getElementById('h2hn-'+id);
       const statsStr=s.total_fouls>0?` · Fouls:${s.total_fouls}`:'';
       const ftStr=s.avg_ft_pct!=null?` · FT%:${s.avg_ft_pct}`:'';
@@ -736,20 +802,24 @@ function renderFtToday(games){
 </html>"""
 
 
-# ─── API helpers ─────────────────────────────────────────────────────────────
+# ─── API Helper ───────────────────────────────────────────────────────────────
 
 async def api_get(endpoint: str, params: dict) -> dict:
+    """Rate-limited GET against API-Sports basketball endpoint."""
     headers = {
         "x-apisports-key": API_KEY,
         "x-rapidapi-host": "v1.basketball.api-sports.io",
     }
-    async with httpx.AsyncClient(timeout=12) as client:
-        r = await client.get(f"{API_BASE}/{endpoint}", headers=headers, params=params)
-        r.raise_for_status()
-        return r.json()
+    sem = _api_semaphore or asyncio.Semaphore(LIVE_API_CONCURRENCY)
+    async with sem:
+        async with httpx.AsyncClient(timeout=API_TIMEOUT) as client:
+            r = await client.get(f"{API_BASE}/{endpoint}", headers=headers, params=params)
+            r.raise_for_status()
+            return r.json()
 
 
 def _normalize_game(g: dict, league_id: int, league_name: str) -> dict:
+    """Extract and normalise relevant fields from a raw API game object."""
     scores  = g.get("scores", {})
     home_s  = scores.get("home", {})
     away_s  = scores.get("away", {})
@@ -779,10 +849,206 @@ def _normalize_game(g: dict, league_id: int, league_name: str) -> dict:
     }
 
 
+# ─── Signal Engine (Python) ───────────────────────────────────────────────────
+# Mirrors the JS hzEngine / ftEngine in the HTML exactly.
+# Consumed by /api/signal/hz and /api/signal/ft — use these for the Telegram bot.
+
+def _hz_engine(
+    *,
+    h2h:       Optional[float],
+    line:      float,
+    q1:        float,
+    q2:        float,
+    timer:     float,
+    fouls:     int,
+    ft_pct:    Optional[float],
+    fg_pct:    Optional[float],
+    line_drop: bool,
+    line_rise: bool,
+) -> dict:
+    time_left = max(0.0, 10.0 - timer)
+    q2_proj   = q2 + (q2 / timer) * time_left if timer > 0.5 and q2 > 0 else q1
+    proj      = q1 + q2_proj
+    buffer    = proj - line
+    h2h_buf   = (h2h - line) if (h2h is not None and h2h > 0) else None
+
+    fouls_oc     = fouls >= HZ_FOULS_THRESHOLD
+    ft_oc        = ft_pct is not None and ft_pct >= HZ_FT_PCT_CATALYST
+    line_mc      = line_drop or line_rise
+    h2h_over_cat = h2h_buf is not None and h2h_buf <= HZ_H2H_OVER_BUFFER
+    fg_skip      = fg_pct is not None and fg_pct > HZ_FG_SKIP
+    entry_ok     = time_left >= HZ_ENTRY_MIN
+    entry_a      = time_left >= HZ_ENTRY_OPTIMAL
+
+    dir_    = "SKIP"
+    stufe   = "C"
+    reasons: list[str] = []
+
+    if buffer >= HZ_BUFFER_UNDER and entry_ok and fouls < HZ_FOULS_THRESHOLD and not fg_skip:
+        dir_ = "UNDER"
+        if entry_a:
+            if h2h_buf is not None and h2h_buf < HZ_H2H_UNDER_KONTRA:
+                stufe = "B"
+                reasons = [
+                    f"Buffer +{buffer:.1f} >= {HZ_BUFFER_UNDER}",
+                    f"H2H {h2h} < Linie -> kontra",
+                ]
+            else:
+                stufe = "A"
+                reasons = [
+                    f"Buffer +{buffer:.1f} >= {HZ_BUFFER_UNDER}",
+                    f"Entry {time_left:.1f}min",
+                    f"Fouls {fouls} < {HZ_FOULS_THRESHOLD}",
+                ]
+                if h2h_buf is not None and h2h_buf >= HZ_H2H_CONFIRM_BUFFER:
+                    reasons.append(f"H2H +{h2h_buf:.1f} bestaetigt")
+        else:
+            stufe = "B"
+            reasons = [
+                f"Buffer +{buffer:.1f}",
+                f"Entry {time_left:.1f}min spaet",
+            ]
+
+    elif buffer <= -HZ_BUFFER_OVER and entry_ok:
+        dir_ = "OVER"
+        if fouls_oc or ft_oc or line_mc or h2h_over_cat:
+            stufe = "A"
+            if fouls_oc:
+                reasons.append(f"Fouls {fouls} >= {HZ_FOULS_THRESHOLD}")
+            if ft_oc:
+                reasons.append(f"FT% {ft_pct}%")
+            if line_mc:
+                reasons.append("Linie bewegt")
+            if h2h_over_cat:
+                reasons.append(f"H2H {h2h_buf:.1f} unter Linie")
+        else:
+            stufe = "B"
+            reasons = [
+                f"Buffer {buffer:.1f} unter Linie",
+                "Kein Katalysator",
+            ]
+        reasons.append(f"Entry {time_left:.1f}min")
+
+    else:
+        if fg_skip:
+            reasons.append(f"FG% {fg_pct}% > {HZ_FG_SKIP} -> Skip")
+        if not entry_ok:
+            reasons.append(f"Entry {time_left:.1f}min < {HZ_ENTRY_MIN}")
+        if abs(buffer) < HZ_BUFFER_OVER:
+            reasons.append(f"Buffer {buffer:.1f} < {HZ_BUFFER_OVER}")
+        if fouls >= HZ_FOULS_THRESHOLD and buffer > 0:
+            reasons.append(f"Fouls >={HZ_FOULS_THRESHOLD} -> OVER pruefen")
+        if not reasons:
+            reasons.append("Kein Signal")
+
+    return {
+        "dir":       dir_,
+        "stufe":     stufe,
+        "type":      "HZ",
+        "proj":      round(proj, 1),
+        "buffer":    round(buffer, 1),
+        "time_left": round(time_left, 1),
+        "fouls":     fouls,
+        "reasons":   reasons,
+    }
+
+
+def _ft_engine(
+    *,
+    h2h:      Optional[float],
+    line:     float,
+    q3h:      float,
+    q3a:      float,
+    hz:       float,
+    fouls:    int,
+    ft_pct_h: Optional[float],
+    ft_pct_a: Optional[float],
+) -> dict:
+    q3_total = q3h + q3a
+    current  = hz + q3_total
+    gap      = abs(q3h - q3a)
+    buffer   = current - line
+    h2h_buf  = (h2h - line) if (h2h is not None and h2h > 0) else None
+    ft_ok    = (
+        ft_pct_h is not None and ft_pct_h >= FT_FT_PCT_THRESHOLD and
+        ft_pct_a is not None and ft_pct_a >= FT_FT_PCT_THRESHOLD
+    )
+
+    dir_    = "SKIP"
+    stufe   = "C"
+    reasons: list[str] = []
+
+    if gap > FT_GAP_MAX:
+        reasons.append(f"Gap {gap} > {FT_GAP_MAX} -> Garbage Time Skip")
+        return {
+            "dir": dir_, "stufe": stufe, "type": "FT",
+            "proj": current, "buffer": round(buffer, 1),
+            "time_left": None, "fouls": fouls, "reasons": reasons,
+        }
+
+    if buffer >= FT_BUFFER_UNDER_A and ft_ok:
+        dir_  = "UNDER"
+        stufe = "A"
+        reasons.append(f"Buffer +{buffer:.1f} >= {FT_BUFFER_UNDER_A}")
+        reasons.append(f"FT% Heim {ft_pct_h}% / Gast {ft_pct_a}% >= {FT_FT_PCT_THRESHOLD}")
+        if h2h_buf is not None and h2h_buf >= FT_H2H_CONFIRM_BUFFER:
+            reasons.append(f"H2H +{h2h_buf:.1f} bestaetigt")
+
+    elif buffer >= FT_BUFFER_UNDER_B:
+        dir_  = "UNDER"
+        stufe = "A" if ft_ok else "B"
+        reasons.append(f"Buffer +{buffer:.1f} >= {FT_BUFFER_UNDER_B}")
+        if not ft_ok:
+            reasons.append(f"FT% unter {FT_FT_PCT_THRESHOLD} -> Stufe B")
+
+    elif buffer <= -FT_BUFFER_OVER and ft_ok:
+        dir_  = "OVER"
+        stufe = "A"
+        reasons.append(f"Buffer {buffer:.1f} <= -{FT_BUFFER_OVER}")
+        reasons.append(f"FT% Heim {ft_pct_h}% / Gast {ft_pct_a}% >= {FT_FT_PCT_THRESHOLD}")
+        if fouls >= FT_FOULS_CATALYST:
+            reasons.append(f"Fouls {fouls} >= {FT_FOULS_CATALYST}")
+
+    elif buffer <= -FT_BUFFER_OVER:
+        dir_  = "OVER"
+        stufe = "B"
+        reasons.append(f"Buffer {buffer:.1f} <= -{FT_BUFFER_OVER}")
+        reasons.append(f"FT% nicht erfuellt -> Stufe B")
+
+    else:
+        reasons.append(f"Buffer {buffer:.1f} — min +/-{FT_BUFFER_UNDER_A} fuer FT")
+
+    return {
+        "dir":       dir_,
+        "stufe":     stufe,
+        "type":      "FT",
+        "proj":      current,
+        "buffer":    round(buffer, 1),
+        "time_left": None,
+        "fouls":     fouls,
+        "reasons":   reasons,
+    }
+
+
 # ─── Google Sheets ────────────────────────────────────────────────────────────
 
 def _matchup_key(home: str, away: str) -> str:
     return "|".join(sorted([home.lower().strip(), away.lower().strip()]))
+
+
+def _add_seen_ft_id(key: str) -> None:
+    """Add a game key with FIFO eviction once SEEN_FT_IDS_MAX is reached."""
+    if key in _seen_ft_ids:
+        return
+    _seen_ft_ids[key] = True
+    if len(_seen_ft_ids) > SEEN_FT_IDS_MAX:
+        _seen_ft_ids.popitem(last=False)  # remove oldest entry
+
+
+def _reset_worksheet() -> None:
+    """Force a fresh connection on next Sheets access."""
+    global _ws
+    _ws = None
 
 
 def _get_worksheet():
@@ -793,96 +1059,157 @@ def _get_worksheet():
         return None
     try:
         import gspread
-        gc  = gspread.service_account_from_dict(json.loads(CREDS_JSON))
-        sh  = gc.open_by_key(SHEETS_ID)
+        gc = gspread.service_account_from_dict(json.loads(CREDS_JSON))
+        sh = gc.open_by_key(SHEETS_ID)
         try:
             _ws = sh.worksheet(SHEETS_TAB)
-            # Ensure header row is correct — if row 1 doesn't match, clear and rewrite
             first_row = _ws.row_values(1)
-            expected = ["date", "home", "away", "league", "q1_total", "q2_total", "ht_total", "ft_total"]
-            if first_row != expected:
-                logging.warning("Sheet header mismatch: %s", first_row)
+            if first_row != SHEETS_HEADER:
+                log.warning("⚠️  Sheet header mismatch — got: %s", first_row)
         except gspread.WorksheetNotFound:
-            _ws = sh.add_worksheet(title=SHEETS_TAB, rows=2000, cols=10)
-            _ws.append_row(["date", "home", "away", "league",
-                            "q1_total", "q2_total", "ht_total", "ft_total"])
+            log.info("Creating new worksheet '%s'", SHEETS_TAB)
+            _ws = sh.add_worksheet(title=SHEETS_TAB, rows=SHEETS_ROWS_INIT, cols=SHEETS_COLS_INIT)
+            _ws.append_row(SHEETS_HEADER)
+        log.info("✅ Google Sheets connected: %s", SHEETS_TAB)
         return _ws
     except Exception as e:
-        logging.warning("Sheets init failed: %s", e)
+        log.warning("Sheets init failed: %s", e)
+        _ws = None
         return None
 
 
 def _load_h2h_from_sheet() -> None:
-    global _h2h_cache, _ft_h2h_cache, _seen_ft_ids
+    """Load all H2H data from Sheet into memory. Replaces caches atomically."""
+    global _h2h_cache, _ft_h2h_cache
     ws = _get_worksheet()
     if ws is None:
         return
     try:
-        rows = ws.get_all_records()
-        _h2h_cache = {}
-        _ft_h2h_cache = {}
-        _seen_ft_ids = set()
+        rows     = ws.get_all_records()
+        h2h_new: dict        = {}
+        ft_new:  dict        = {}
+        seen_new: OrderedDict = OrderedDict()
+
         for row in rows:
             home     = str(row.get("home", "")).strip()
             away     = str(row.get("away", "")).strip()
             ht_total = row.get("ht_total")
             ft_total = row.get("ft_total")
-            game_key = f"{row.get('date','')}-{home}-{away}"
-            _seen_ft_ids.add(game_key)
+            game_key = f"{row.get('date', '')}-{home}-{away}"
+
+            seen_new[game_key] = True
+            if len(seen_new) > SEEN_FT_IDS_MAX:
+                seen_new.popitem(last=False)
+
+            if not (home and away):
+                continue
             key = _matchup_key(home, away)
-            if home and away:
-                if ht_total:
-                    _h2h_cache.setdefault(key, []).append(float(ht_total))
-                if ft_total:
-                    _ft_h2h_cache.setdefault(key, []).append(float(ft_total))
-        logging.info("Loaded %d HZ / %d FT matchups", len(_h2h_cache), len(_ft_h2h_cache))
+            if ht_total:
+                h2h_new.setdefault(key, []).append(float(ht_total))
+            if ft_total:
+                ft_new.setdefault(key, []).append(float(ft_total))
+
+        # Atomic replacement
+        _h2h_cache    = h2h_new
+        _ft_h2h_cache = ft_new
+        _seen_ft_ids.clear()
+        _seen_ft_ids.update(seen_new)
+        log.info("✅ H2H cache loaded — HZ:%d matchups  FT:%d matchups  seen:%d games",
+                 len(_h2h_cache), len(_ft_h2h_cache), len(_seen_ft_ids))
     except Exception as e:
-        logging.warning("H2H load failed: %s", e)
+        log.warning("H2H load failed: %s — resetting Sheets connection", e)
+        _reset_worksheet()
 
 
-async def _extract_ft_games(date_str: str | None = None) -> int:
-    """Fetch FT games for a date, write new rows to Sheets. Returns rows written."""
+# ─── FT Extraction (split into focused helpers) ───────────────────────────────
+
+def _build_ft_row(g: dict, league_id: int, name: str, target: str) -> Optional[list]:
+    """
+    Parse one raw game object. Returns a Sheets row if it's a new FT game,
+    None if already seen, incomplete, or not FT status.
+    Also updates the in-memory H2H caches immediately.
+    """
+    if g.get("status", {}).get("short", "") != "FT":
+        return None
+    ng       = _normalize_game(g, league_id, name)
+    home     = ng["home"]
+    away     = ng["away"]
+    ft_total = ng["total_home"] + ng["total_away"]
+    if ft_total == 0:
+        return None
+    game_key = f"{target}-{home}-{away}"
+    if game_key in _seen_ft_ids:
+        return None
+
+    _add_seen_ft_id(game_key)
+    q2_total     = ng["q2_home"] + ng["q2_away"]
+    ht_total_val = ng["q1_total"] + q2_total
+    key = _matchup_key(home, away)
+    _h2h_cache.setdefault(key, []).append(float(ht_total_val))
+    _ft_h2h_cache.setdefault(key, []).append(float(ft_total))
+
+    return [target, home, away, ng["league_name"],
+            ng["q1_total"], q2_total, ht_total_val, ft_total]
+
+
+async def _fetch_ft_for_league(
+    league_id: int, name: str, season: str, target: str
+) -> list[list]:
+    """Fetch and process FT games for a single league on one date."""
+    try:
+        data = await api_get("games", {"league": league_id, "season": season, "date": target})
+        rows = []
+        for g in (data.get("response") or []):
+            row = _build_ft_row(g, league_id, name, target)
+            if row:
+                rows.append(row)
+        return rows
+    except Exception as e:
+        log.debug("FT fetch failed — league:%s date:%s — %s", league_id, target, e)
+        return []
+
+
+async def _write_rows_to_sheet(rows: list[list]) -> None:
+    """Append rows to Google Sheet; resets connection on any write failure."""
+    ws = await asyncio.to_thread(_get_worksheet)
+    if not ws:
+        return
+    try:
+        await asyncio.to_thread(ws.append_rows, rows, value_input_option="RAW")
+        log.info("✅ Wrote %d rows to Sheet", len(rows))
+    except Exception as e:
+        log.warning("Sheets write failed: %s — resetting connection", e)
+        _reset_worksheet()
+
+
+async def _extract_ft_games(date_str: Optional[str] = None) -> int:
+    """
+    Fetch FT games across all leagues for one date, write new rows to Sheet.
+    All league fetches run concurrently (bounded by _api_semaphore).
+    Returns number of new rows written.
+    """
     if not API_KEY:
         return 0
     target = date_str or _date.today().isoformat()
-    new_rows = []
-    for league_id, (name, season) in LEAGUES.items():
-        try:
-            data = await api_get("games", {"league": league_id, "season": season, "date": target})
-            for g in (data.get("response") or []):
-                if g.get("status", {}).get("short", "") != "FT":
-                    continue
-                ng = _normalize_game(g, league_id, name)
-                home, away = ng["home"], ng["away"]
-                ft_total = ng["total_home"] + ng["total_away"]
-                if ft_total == 0:
-                    continue
-                game_key = f"{target}-{home}-{away}"
-                if game_key in _seen_ft_ids:
-                    continue
-                _seen_ft_ids.add(game_key)
-                q2_total     = ng["q2_home"] + ng["q2_away"]
-                ht_total_val = ng["q1_total"] + q2_total
-                new_rows.append([target, home, away, ng["league_name"],
-                                  ng["q1_total"], q2_total, ht_total_val, ft_total])
-                key = _matchup_key(home, away)
-                _h2h_cache.setdefault(key, []).append(float(ht_total_val))
-                _ft_h2h_cache.setdefault(key, []).append(float(ft_total))
-        except Exception as e:
-            logging.warning("FT extract %s league %s: %s", target, league_id, e)
+    log.info("Extracting FT games for %s …", target)
+
+    tasks   = [_fetch_ft_for_league(lid, name, season, target)
+               for lid, (name, season) in LEAGUES.items()]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    new_rows: list[list] = []
+    for r in results:
+        if isinstance(r, list):
+            new_rows.extend(r)
 
     if new_rows:
-        ws = await asyncio.to_thread(_get_worksheet)
-        if ws:
-            try:
-                await asyncio.to_thread(ws.append_rows, new_rows, value_input_option="RAW")
-                logging.info("Wrote %d rows (%s)", len(new_rows), target)
-            except Exception as e:
-                logging.warning("Sheets write failed: %s", e)
-                global _ws
-                _ws = None
+        await _write_rows_to_sheet(new_rows)
+
+    log.info("FT extract done — %s: %d new rows", target, len(new_rows))
     return len(new_rows)
 
+
+# ─── Background Scheduler ─────────────────────────────────────────────────────
 
 async def _scheduler_loop() -> None:
     await asyncio.to_thread(_load_h2h_from_sheet)
@@ -890,8 +1217,53 @@ async def _scheduler_loop() -> None:
         try:
             await _extract_ft_games()
         except Exception as e:
-            logging.warning("Scheduler: %s", e)
-        await asyncio.sleep(1800)
+            log.warning("Scheduler error: %s", e)
+        await asyncio.sleep(SCHEDULER_INTERVAL)
+
+
+# ─── Live Games Helpers ───────────────────────────────────────────────────────
+
+async def _fetch_live_for_league(
+    league_id: int, name: str, season: str,
+) -> tuple[list, list, list]:
+    """
+    Fetch all live games for one league.
+    Returns (hz_games, q3bt_games, other_live_games).
+    """
+    hz, q3, others = [], [], []
+    try:
+        data = await api_get("games", {"league": league_id, "season": season, "live": "all"})
+        for g in (data.get("response") or []):
+            status = g.get("status", {}).get("short", "")
+            ng     = _normalize_game(g, league_id, name)
+            if status in ("HT", "Q2"):
+                hz.append(ng)
+            elif status == "Q3BT":
+                q3.append(ng)
+            else:
+                others.append(ng)
+    except Exception as e:
+        log.debug("Live fetch failed — league:%s — %s", league_id, e)
+    return hz, q3, others
+
+
+async def _fetch_today_for_league(
+    league_id: int, name: str, season: str,
+    today_str: str, already_seen: set,
+) -> list:
+    """Fetch today's scheduled games, skipping IDs already returned by live endpoint."""
+    try:
+        data = await api_get("games", {"league": league_id, "season": season, "date": today_str})
+        results = []
+        for g in (data.get("response") or []):
+            gid = g.get("id")
+            if gid not in already_seen:
+                already_seen.add(gid)
+                results.append(_normalize_game(g, league_id, name))
+        return results
+    except Exception as e:
+        log.debug("Today fetch failed — league:%s — %s", league_id, e)
+        return []
 
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
@@ -904,59 +1276,89 @@ async def root():
 @app.get("/api/health")
 async def health():
     return {
-        "status": "ok",
+        "status":            "ok",
         "api_key_set":       bool(API_KEY),
         "sheets_configured": bool(SHEETS_ID and CREDS_JSON),
-        "hz_matchups":  len(_h2h_cache),
-        "ft_matchups":  len(_ft_h2h_cache),
+        "hz_matchups":       len(_h2h_cache),
+        "ft_matchups":       len(_ft_h2h_cache),
+        "seen_ft_ids":       len(_seen_ft_ids),
     }
 
 
 @app.get("/api/leagues")
 async def get_leagues():
-    return {"leagues": [{"id": k, "name": v[0], "season": v[1]} for k, v in LEAGUES.items()]}
+    return {
+        "leagues": [
+            {"id": k, "name": v[0], "season": v[1]}
+            for k, v in LEAGUES.items()
+        ]
+    }
 
 
 @app.get("/api/live")
 async def get_live_games():
     if not API_KEY:
-        return {"games": _demo_hz(), "today": _demo_today(), "q3": _demo_q3(),
-                "source": "demo", "count": 2}
+        return {
+            "games":  _demo_hz(),
+            "today":  _demo_today(),
+            "q3":     _demo_q3(),
+            "source": "demo",
+            "count":  2,
+        }
 
     today_str = _date.today().isoformat()
-    live_hz, live_q3, today_all, seen = [], [], [], set()
 
-    for league_id, (name, season) in LEAGUES.items():
-        try:
-            data = await api_get("games", {"league": league_id, "season": season, "live": "all"})
-            for g in (data.get("response") or []):
-                gid = g.get("id")
-                if gid in seen:
-                    continue
-                seen.add(gid)
-                status = g.get("status", {}).get("short", "")
-                ng = _normalize_game(g, league_id, name)
-                if status in ("HT", "Q2"):
-                    live_hz.append(ng)
-                elif status == "Q3BT":
-                    live_q3.append(ng)
-                else:
-                    today_all.append(ng)
-        except Exception:
-            pass
+    # Phase 1 — all live games concurrently (semaphore-limited)
+    live_results = await asyncio.gather(
+        *[_fetch_live_for_league(lid, name, season)
+          for lid, (name, season) in LEAGUES.items()],
+        return_exceptions=True,
+    )
 
-        try:
-            data2 = await api_get("games", {"league": league_id, "season": season, "date": today_str})
-            for g in (data2.get("response") or []):
-                gid = g.get("id")
-                if gid not in seen:
-                    seen.add(gid)
-                    today_all.append(_normalize_game(g, league_id, name))
-        except Exception:
+    live_hz:    list = []
+    live_q3:    list = []
+    live_other: list = []
+    seen_ids:   set  = set()
+
+    for r in live_results:
+        if not isinstance(r, tuple):
             continue
+        hz, q3, others = r
+        for g in hz:
+            if g["id"] not in seen_ids:
+                seen_ids.add(g["id"])
+                live_hz.append(g)
+        for g in q3:
+            if g["id"] not in seen_ids:
+                seen_ids.add(g["id"])
+                live_q3.append(g)
+        for g in others:
+            if g["id"] not in seen_ids:
+                seen_ids.add(g["id"])
+                live_other.append(g)
 
-    return {"games": live_hz, "q3": live_q3, "today": today_all[:40],
-            "source": "live", "count": len(live_hz)}
+    # Phase 2 — today's schedule (fills in NS/FT games not in live feed)
+    today_results = await asyncio.gather(
+        *[_fetch_today_for_league(lid, name, season, today_str, seen_ids)
+          for lid, (name, season) in LEAGUES.items()],
+        return_exceptions=True,
+    )
+
+    today_all: list = list(live_other)
+    for r in today_results:
+        if isinstance(r, list):
+            today_all.extend(r)
+
+    log.info("Live poll done — HZ:%d  Q3BT:%d  today:%d",
+             len(live_hz), len(live_q3), len(today_all))
+
+    return {
+        "games":  live_hz,
+        "q3":     live_q3,
+        "today":  today_all[:TODAY_GAMES_LIMIT],
+        "source": "live",
+        "count":  len(live_hz),
+    }
 
 
 @app.get("/api/h2h")
@@ -968,87 +1370,153 @@ async def get_h2h(home: str, away: str, type: str = "hz"):
     return {"avg": avg, "count": len(vals), "found": avg is not None, "type": type}
 
 
+def _parse_team_stats(t: dict) -> dict:
+    """Extract fouls and shooting percentages from one team's statistics block."""
+    fg = t.get("field_goals", {})
+    ft = t.get("freethrows_goals", {})
+    return {
+        "team_id":   t.get("team", {}).get("id"),
+        "team_name": t.get("team", {}).get("name", ""),
+        "fouls":     t.get("personal_fouls") or 0,
+        "ft_pct":    ft.get("percentage") or None,
+        "ft_made":   ft.get("total") or 0,
+        "ft_att":    ft.get("attempts") or 0,
+        "fg_pct":    fg.get("percentage") or None,
+    }
+
+
 @app.get("/api/game-stats/{game_id}")
 async def get_game_stats(game_id: int):
     """
-    Fetch live stats for a game: fouls, FT%, FG% per team.
-    Called automatically when a game card is selected.
+    Live stats for a game: fouls, FT%, FG% per team.
+    Response is cached for GAME_STATS_CACHE_TTL seconds — safe to call on every card click.
     """
+    cached = _game_stats_cache.get(game_id)
+    if cached and (time() - cached[0]) < GAME_STATS_CACHE_TTL:
+        log.debug("game-stats cache hit — id:%s", game_id)
+        return cached[1]
+
     if not API_KEY:
         return {"found": False}
+
     try:
-        data = await api_get("games/statistics", {"id": game_id})
+        data  = await api_get("games/statistics", {"id": game_id})
         teams = data.get("response") or []
         if not teams:
-            return {"found": False}
+            result = {"found": False}
+            _game_stats_cache[game_id] = (time(), result)
+            return result
 
-        def parse_team(t: dict) -> dict:
-            fg  = t.get("field_goals", {})
-            ft  = t.get("freethrows_goals", {})
-            return {
-                "team_id":   t.get("team", {}).get("id"),
-                "team_name": t.get("team", {}).get("name", ""),
-                "fouls":     t.get("personal_fouls") or 0,
-                "ft_pct":    ft.get("percentage") or None,
-                "ft_made":   ft.get("total") or 0,
-                "ft_att":    ft.get("attempts") or 0,
-                "fg_pct":    fg.get("percentage") or None,
-            }
-
-        parsed = [parse_team(t) for t in teams]
+        parsed      = [_parse_team_stats(t) for t in teams]
         total_fouls = sum(p["fouls"] for p in parsed)
-        ft_pcts = [p["ft_pct"] for p in parsed if p["ft_pct"] is not None]
-        fg_pcts = [p["fg_pct"] for p in parsed if p["fg_pct"] is not None]
+        ft_pcts     = [p["ft_pct"] for p in parsed if p["ft_pct"] is not None]
+        fg_pcts     = [p["fg_pct"] for p in parsed if p["fg_pct"] is not None]
 
-        return {
-            "found": True,
-            "teams": parsed,
+        result = {
+            "found":       True,
+            "teams":       parsed,
             "total_fouls": total_fouls,
             "avg_ft_pct":  round(sum(ft_pcts) / len(ft_pcts), 1) if ft_pcts else None,
             "avg_fg_pct":  round(sum(fg_pcts) / len(fg_pcts), 1) if fg_pcts else None,
-            # Home = first team, Away = second team (API convention)
             "home_ft_pct": parsed[0]["ft_pct"] if len(parsed) > 0 else None,
             "away_ft_pct": parsed[1]["ft_pct"] if len(parsed) > 1 else None,
         }
+        _game_stats_cache[game_id] = (time(), result)
+        log.debug("game-stats fetched — id:%s  fouls:%s", game_id, total_fouls)
+        return result
+
     except Exception as e:
-        logging.warning("game-stats %s: %s", game_id, e)
+        log.warning("game-stats %s: %s", game_id, e)
         return {"found": False, "error": str(e)}
+
+
+@app.get("/api/signal/hz")
+async def signal_hz(
+    line:      float           = Query(...,  description="Bookie HZ line"),
+    q1:        float           = Query(0,    description="Q1 total points"),
+    q2:        float           = Query(0,    description="Q2 current points"),
+    timer:     float           = Query(0,    description="Q2 time elapsed (minutes)"),
+    fouls:     int             = Query(0,    description="Total fouls both teams"),
+    h2h:       Optional[float] = Query(None, description="H2H average HZ total"),
+    ft_pct:    Optional[float] = Query(None, description="Average FT% both teams"),
+    fg_pct:    Optional[float] = Query(None, description="Average FG% both teams"),
+    line_drop: bool            = Query(False, description="Line dropped >=8 points"),
+    line_rise: bool            = Query(False, description="Line is rising"),
+):
+    """
+    HZ Signal Engine as a JSON API.
+    Example: /api/signal/hz?line=91.5&q1=52&q2=28&timer=4&fouls=5
+    Returns: dir (UNDER/OVER/SKIP), stufe (A/B/C), proj, buffer, time_left, reasons[]
+    """
+    return _hz_engine(
+        h2h=h2h, line=line, q1=q1, q2=q2, timer=timer,
+        fouls=fouls, ft_pct=ft_pct, fg_pct=fg_pct,
+        line_drop=line_drop, line_rise=line_rise,
+    )
+
+
+@app.get("/api/signal/ft")
+async def signal_ft(
+    line:     float           = Query(...,  description="Bookie FT line"),
+    q3h:      float           = Query(0,    description="Q3 home score"),
+    q3a:      float           = Query(0,    description="Q3 away score"),
+    hz:       float           = Query(0,    description="HZ total"),
+    fouls:    int             = Query(0,    description="Total fouls both teams"),
+    h2h:      Optional[float] = Query(None, description="H2H average FT total"),
+    ft_pct_h: Optional[float] = Query(None, description="Home team FT%"),
+    ft_pct_a: Optional[float] = Query(None, description="Away team FT%"),
+):
+    """
+    FT Signal Engine as a JSON API.
+    Example: /api/signal/ft?line=182.5&hz=90&q3h=25&q3a=22&ft_pct_h=78&ft_pct_a=75
+    Returns: dir (UNDER/OVER/SKIP), stufe (A/B/C), proj, buffer, reasons[]
+    """
+    return _ft_engine(
+        h2h=h2h, line=line, q3h=q3h, q3a=q3a,
+        hz=hz, fouls=fouls, ft_pct_h=ft_pct_h, ft_pct_a=ft_pct_a,
+    )
 
 
 @app.get("/api/backfill")
 async def backfill(
-    days: int = Query(default=7, ge=1, le=14),
+    days:   int = Query(default=7, ge=1, le=BACKFILL_MAX_DAYS),
     offset: int = Query(default=0, ge=0, le=180),
 ):
     """
     Backfill Google Sheet with historical FT data.
-    Use small batches to avoid OOM on free Render plan.
-    Example sequence:
-      /api/backfill?days=7&offset=0   (yesterday to 7 days ago)
-      /api/backfill?days=7&offset=7   (8-14 days ago)
-      /api/backfill?days=7&offset=14  (15-21 days ago)
+    Keep batches <=7 days to stay within Render Free 512 MB RAM.
+
+    Recommended sequence (in separate requests):
+      /api/backfill?days=7&offset=0    → 1–7 days ago
+      /api/backfill?days=7&offset=7    → 8–14 days ago
+      /api/backfill?days=7&offset=14   → 15–21 days ago
     """
     if not API_KEY:
         raise HTTPException(status_code=400, detail="API_SPORTS_KEY not set")
-    total = 0
+
     today = _date.today()
+    total = 0
+    log.info("🔄 Backfill started — days:%d offset:%d", days, offset)
+
     for i in range(1 + offset, days + offset + 1):
         target = (today - timedelta(days=i)).isoformat()
         try:
-            written = await _extract_ft_games(target)
-            total += written
+            written  = await _extract_ft_games(target)
+            total   += written
         except Exception as e:
-            logging.warning("Backfill %s: %s", target, e)
-        await asyncio.sleep(0.5)
+            log.warning("Backfill %s: %s", target, e)
+        await asyncio.sleep(BACKFILL_SLEEP)
+
     await asyncio.to_thread(_load_h2h_from_sheet)
+    log.info("✅ Backfill complete — %d rows written", total)
     return {
-        "status": "done",
+        "status":         "done",
         "days_processed": days,
-        "offset": offset,
-        "range": f"{offset+1}–{offset+days} days ago",
-        "rows_written": total,
-        "hz_matchups": len(_h2h_cache),
-        "ft_matchups": len(_ft_h2h_cache),
+        "offset":         offset,
+        "range":          f"{offset + 1}–{offset + days} days ago",
+        "rows_written":   total,
+        "hz_matchups":    len(_h2h_cache),
+        "ft_matchups":    len(_ft_h2h_cache),
     }
 
 
@@ -1056,17 +1524,24 @@ async def backfill(
 async def trigger_extract():
     written = await _extract_ft_games()
     await asyncio.to_thread(_load_h2h_from_sheet)
-    return {"status": "ok", "rows_written": written,
-            "hz_matchups": len(_h2h_cache), "ft_matchups": len(_ft_h2h_cache)}
+    return {
+        "status":       "ok",
+        "rows_written": written,
+        "hz_matchups":  len(_h2h_cache),
+        "ft_matchups":  len(_ft_h2h_cache),
+    }
 
 
 @app.get("/api/reload-cache")
 async def reload_cache():
-    """Force reload H2H cache from Google Sheet. Call this after backfill or if matchups show 0."""
-    global _ws
-    _ws = None  # force reconnect to sheets
+    """Force reload H2H cache from Google Sheet. Call after backfill if matchups show 0."""
+    _reset_worksheet()
     await asyncio.to_thread(_load_h2h_from_sheet)
-    return {"status": "ok", "hz_matchups": len(_h2h_cache), "ft_matchups": len(_ft_h2h_cache)}
+    return {
+        "status":      "ok",
+        "hz_matchups": len(_h2h_cache),
+        "ft_matchups": len(_ft_h2h_cache),
+    }
 
 
 @app.get("/api/debug-sheets")
@@ -1076,33 +1551,33 @@ async def debug_sheets():
         return {"error": "SHEETS_ID or CREDS_JSON not configured"}
     try:
         import gspread
-        gc = gspread.service_account_from_dict(json.loads(CREDS_JSON))
-        sh = gc.open_by_key(SHEETS_ID)
+        gc       = gspread.service_account_from_dict(json.loads(CREDS_JSON))
+        sh       = gc.open_by_key(SHEETS_ID)
         all_tabs = [ws.title for ws in sh.worksheets()]
         try:
-            ws = sh.worksheet(SHEETS_TAB)
+            ws   = sh.worksheet(SHEETS_TAB)
             rows = ws.get_all_records()
             return {
-                "status": "ok",
-                "all_tabs": all_tabs,
-                "target_tab": SHEETS_TAB,
-                "total_rows": len(rows),
+                "status":      "ok",
+                "all_tabs":    all_tabs,
+                "target_tab":  SHEETS_TAB,
+                "total_rows":  len(rows),
                 "first_3_rows": rows[:3],
             }
         except Exception as e:
             return {
-                "status": "tab_error",
-                "all_tabs": all_tabs,
+                "status":     "tab_error",
+                "all_tabs":   all_tabs,
                 "target_tab": SHEETS_TAB,
-                "error": str(e),
+                "error":      str(e),
             }
     except Exception as e:
         return {"status": "connection_error", "error": str(e)}
 
 
-# ─── Demo data ────────────────────────────────────────────────────────────────
+# ─── Demo Data ────────────────────────────────────────────────────────────────
 
-def _demo_hz():
+def _demo_hz() -> list:
     return [
         {"id": 1001, "league_id": 4, "league_name": "ACB", "status": "HT", "timer": None,
          "home": "Real Madrid", "away": "FC Barcelona",
@@ -1114,7 +1589,8 @@ def _demo_hz():
          "total_home": 49, "total_away": 41, "q1_total": 58, "q2_live": 32, "ht_total": 90},
     ]
 
-def _demo_q3():
+
+def _demo_q3() -> list:
     return [
         {"id": 2001, "league_id": 3, "league_name": "EuroLeague", "status": "Q3BT", "timer": None,
          "home": "Olympiacos", "away": "CSKA",
@@ -1123,7 +1599,8 @@ def _demo_q3():
          "total_home": 67, "total_away": 71, "q1_total": 46, "q2_live": 45, "ht_total": 91},
     ]
 
-def _demo_today():
+
+def _demo_today() -> list:
     return [
         {"id": 3001, "league_id": 8, "league_name": "Lega A", "status": "FT", "timer": None,
          "home": "Olimpia Milano", "away": "Virtus Bologna",
