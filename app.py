@@ -943,8 +943,18 @@ async def backfill(days: int = Query(default=30, ge=1, le=90)):
 @app.get("/api/trigger-extract")
 async def trigger_extract():
     written = await _extract_ft_games()
+    await asyncio.to_thread(_load_h2h_from_sheet)
     return {"status": "ok", "rows_written": written,
             "hz_matchups": len(_h2h_cache), "ft_matchups": len(_ft_h2h_cache)}
+
+
+@app.get("/api/reload-cache")
+async def reload_cache():
+    """Force reload H2H cache from Google Sheet. Call this after backfill or if matchups show 0."""
+    global _ws
+    _ws = None  # force reconnect to sheets
+    await asyncio.to_thread(_load_h2h_from_sheet)
+    return {"status": "ok", "hz_matchups": len(_h2h_cache), "ft_matchups": len(_ft_h2h_cache)}
 
 
 # ─── Demo data ────────────────────────────────────────────────────────────────
