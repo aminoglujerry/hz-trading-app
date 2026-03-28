@@ -70,6 +70,9 @@ LIVE_API_CONCURRENCY  = 8       # max simultaneous API-Sports calls
 SHEETS_ROWS_INIT      = 2000
 SHEETS_COLS_INIT      = 10
 
+H2H_HZ_MAX            = 400    # sanity cap for halftime total (any value above is corrupt)
+H2H_FT_MAX            = 800    # sanity cap for full-game total
+
 SHEETS_HEADER = ["date", "home", "away", "league",
                  "q1_total", "q2_total", "ht_total", "ft_total"]
 
@@ -1088,7 +1091,10 @@ function previewCard(g){
           oninput="calcPreSignal(${g.id})">
       </div>
       <div class="pre-card-bot">
-        <span class="h2h-note" id="pvh2h-${g.id}">H2H lädt…</span>
+        <div style="display:flex;flex-direction:column;gap:2px;">
+          <span class="h2h-note" id="pvh2h-${g.id}">H2H lädt…</span>
+          <span class="h2h-note" id="pvfth2h-${g.id}" style="font-size:8px;color:var(--dim);">FT H2H lädt…</span>
+        </div>
         <span class="pre-sig-badge neutral" id="pvbadge-${g.id}">—</span>
       </div>
     </div>
@@ -1096,19 +1102,33 @@ function previewCard(g){
 }
 async function loadPreviewH2h(g){
   try{
-    const d=await fetch(`/api/h2h?home=${encodeURIComponent(g.home)}&away=${encodeURIComponent(g.away)}`).then(r=>r.json());
+    const [hzD,ftD]=await Promise.all([
+      fetch(`/api/h2h?home=${encodeURIComponent(g.home)}&away=${encodeURIComponent(g.away)}`).then(r=>r.json()),
+      fetch(`/api/h2h?home=${encodeURIComponent(g.home)}&away=${encodeURIComponent(g.away)}&type=ft`).then(r=>r.json()),
+    ]);
     const note=document.getElementById('pvh2h-'+g.id);
+    const ftNote=document.getElementById('pvfth2h-'+g.id);
     const card=document.getElementById('pvc-'+g.id);
     if(!note||!card)return;
-    if(d.found){
-      note.textContent=`H2H Ø ${d.avg} (${d.count}×)`;
+    if(hzD.found){
+      note.textContent=`HZ H2H Ø ${hzD.avg} (${hzD.count}×)`;
       note.className='h2h-note found';
       card.classList.remove('no-h2h');
-      card.dataset.h2h=d.avg;
+      card.dataset.h2h=hzD.avg;
       calcPreSignal(g.id);
     }else{
       note.innerHTML='<span class="h2h-missing">H2H fehlt — Backfill nötig</span>';
       note.className='h2h-note';
+    }
+    if(ftNote){
+      if(ftD.found){
+        ftNote.textContent=`FT H2H Ø ${ftD.avg} (${ftD.count}×)`;
+        ftNote.className='h2h-note found';
+        ftNote.style.fontSize='8px';
+      }else{
+        ftNote.textContent='FT H2H —';
+        ftNote.style.color='var(--dim)';
+      }
     }
   }catch(e){
     const note=document.getElementById('pvh2h-'+g.id);
@@ -1508,9 +1528,17 @@ def _load_h2h_from_sheet() -> None:
                 continue
             key = _matchup_key(home, away)
             if ht_total:
-                h2h_new.setdefault(key, []).append(float(ht_total))
+                val = float(ht_total)
+                if 0 < val <= H2H_HZ_MAX:
+                    h2h_new.setdefault(key, []).append(val)
+                else:
+                    log.warning("Skipping corrupt ht_total=%.0f for %s vs %s", val, home, away)
             if ft_total:
-                ft_new.setdefault(key, []).append(float(ft_total))
+                val = float(ft_total)
+                if 0 < val <= H2H_FT_MAX:
+                    ft_new.setdefault(key, []).append(val)
+                else:
+                    log.warning("Skipping corrupt ft_total=%.0f for %s vs %s", val, home, away)
 
         # Atomic replacement
         _h2h_cache    = h2h_new
@@ -1548,8 +1576,14 @@ def _build_ft_row(g: dict, league_id: int, name: str, target: str) -> Optional[l
     q2_total     = ng["q2_home"] + ng["q2_away"]
     ht_total_val = ng["q1_total"] + q2_total
     key = _matchup_key(home, away)
-    _h2h_cache.setdefault(key, []).append(float(ht_total_val))
-    _ft_h2h_cache.setdefault(key, []).append(float(ft_total))
+    if 0 < ht_total_val <= H2H_HZ_MAX:
+        _h2h_cache.setdefault(key, []).append(float(ht_total_val))
+    else:
+        log.warning("Suspicious ht_total=%.0f for %s vs %s — not cached", ht_total_val, home, away)
+    if 0 < ft_total <= H2H_FT_MAX:
+        _ft_h2h_cache.setdefault(key, []).append(float(ft_total))
+    else:
+        log.warning("Suspicious ft_total=%.0f for %s vs %s — not cached", ft_total, home, away)
 
     return [target, home, away, ng["league_name"],
             ng["q1_total"], q2_total, ht_total_val, ft_total]
