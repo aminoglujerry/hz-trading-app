@@ -62,7 +62,7 @@ date | home | away | league | q1_total | q2_total | ht_total | ft_total
 
 ## Erstes Deployment: Sheet befüllen
 
-Nach dem Deploy in mehreren Batches aufrufen (max. 14 Tage pro Request, Render Free-Tier 512 MB):
+Nach dem Deploy in mehreren Batches aufrufen (max. 14 Tage pro Request — 7 Tage empfohlen wegen Render Free-Tier 512 MB RAM-Limit):
 
 ```
 GET https://<deine-render-url>/api/backfill?days=7&offset=0   → Tage 1–7
