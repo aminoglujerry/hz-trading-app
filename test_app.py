@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from app import (
     _hz_engine,
     _ft_engine,
+    _format_signal_msg,
     _matchup_key,
     _add_seen_ft_id,
     _seen_ft_ids,
@@ -553,3 +554,124 @@ class TestRootEndpoint:
         assert r.status_code == 200
         assert "text/html" in r.headers["content-type"]
         assert "<html" in r.text.lower()
+
+
+# ─── Telegram helpers ─────────────────────────────────────────────────────────
+
+
+class TestFormatSignalMsg:
+    def test_under_signal(self):
+        sig = {
+            "dir": "UNDER", "stufe": "A", "type": "HZ",
+            "proj": 96.0, "buffer": 5.5, "time_left": 4.2,
+            "fouls": 4, "reasons": ["Buffer +5.5 >= 5", "H2H +3.2 bestaetigt"],
+        }
+        msg = _format_signal_msg(sig, "Real Madrid vs Barcelona (ACB)")
+        assert "UNDER" in msg
+        assert "STUFE A" in msg
+        assert "HZ" in msg
+        assert "Real Madrid" in msg
+        assert "Buffer: +5.5" in msg
+        assert "Zeit Q2: 4.2" in msg
+        assert "Buffer +5.5 >= 5" in msg
+
+    def test_over_signal(self):
+        sig = {
+            "dir": "OVER", "stufe": "B", "type": "FT",
+            "proj": 130.0, "buffer": -9.0, "time_left": None,
+            "fouls": 10, "reasons": ["Buffer -9.0 unter Linie"],
+        }
+        msg = _format_signal_msg(sig)
+        assert "OVER" in msg
+        assert "STUFE B" in msg
+        assert "FT" in msg
+        assert "Buffer: -9.0" in msg
+        assert "Zeit Q2" not in msg  # time_left is None for FT
+
+    def test_no_label(self):
+        sig = {
+            "dir": "UNDER", "stufe": "C", "type": "HZ",
+            "proj": 80.0, "buffer": 3.0, "time_left": 5.0,
+            "fouls": 2, "reasons": [],
+        }
+        msg = _format_signal_msg(sig)
+        assert "UNDER" in msg
+
+    def test_skip_signal(self):
+        sig = {
+            "dir": "SKIP", "stufe": "C", "type": "HZ",
+            "proj": 85.0, "buffer": 1.0, "time_left": 8.0,
+            "fouls": 3, "reasons": ["Kein Signal"],
+        }
+        msg = _format_signal_msg(sig, "Test Game")
+        assert "SKIP" in msg
+
+
+# ─── Telegram Endpoints ───────────────────────────────────────────────────────
+
+
+class TestHealthTelegramField:
+    def test_health_includes_telegram_configured(self, client):
+        r = client.get("/api/health")
+        assert r.status_code == 200
+        data = r.json()
+        assert "telegram_configured" in data
+
+    def test_telegram_not_configured_in_test_env(self, client):
+        # In test environment, TELEGRAM_BOT_TOKEN/CHAT_ID are not set
+        r = client.get("/api/health")
+        assert r.json()["telegram_configured"] is False
+
+
+class TestTelegramTestEndpoint:
+    def test_returns_400_when_not_configured(self, client):
+        # No Telegram credentials in test env → 400
+        r = client.get("/api/telegram/test")
+        assert r.status_code == 400
+        assert "TELEGRAM_BOT_TOKEN" in r.json()["detail"]
+
+
+class TestTelegramPushEndpoint:
+    def test_returns_not_configured_when_no_token(self, client):
+        payload = {
+            "dir": "UNDER", "stufe": "A", "type": "HZ",
+            "proj": 96.0, "buffer": 5.5, "time_left": 4.2,
+            "fouls": 4, "reasons": ["Buffer +5.5 >= 5"],
+            "label": "Real Madrid vs Barcelona",
+        }
+        r = client.post("/api/telegram/push", json=payload)
+        assert r.status_code == 200
+        data = r.json()
+        assert data["sent"] is False
+        assert data["reason"] == "telegram_not_configured"
+
+    def test_skip_signal_not_sent(self, client):
+        payload = {
+            "dir": "SKIP", "stufe": "C", "type": "HZ",
+            "proj": 85.0, "buffer": 1.0, "time_left": 8.0,
+            "fouls": 3, "reasons": ["Kein Signal"], "label": "",
+        }
+        r = client.post("/api/telegram/push", json=payload)
+        assert r.status_code == 200
+        data = r.json()
+        assert data["sent"] is False
+        assert data["reason"] == "skip_signal"
+
+    def test_missing_body_returns_422(self, client):
+        r = client.post("/api/telegram/push")
+        assert r.status_code == 422
+
+
+class TestLiveScanEndpoint:
+    def test_returns_200_without_api_key(self, client):
+        # No API key in test env → returns early with empty lists
+        r = client.get("/api/live-scan")
+        assert r.status_code == 200
+        data = r.json()
+        assert "hz" in data
+        assert "q3" in data
+        assert "count" in data
+        assert "telegram_sent" in data
+        assert data["telegram_sent"] is False
+        assert data["source"] == "no_api_key"
+

@@ -3,7 +3,7 @@ HZ / FT Trading — Basketball Live Signal Engine
 Optimised for Render Free Plan (512 MB RAM)
 """
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -34,6 +34,9 @@ API_BASE   = "https://v1.basketball.api-sports.io"
 SHEETS_ID  = os.getenv("GOOGLE_SHEETS_ID", "")
 SHEETS_TAB = os.getenv("GOOGLE_SHEETS_TAB", "h2h_2025_2026")
 CREDS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 
 # ─── Signal Engine Constants ──────────────────────────────────────────────────
 
@@ -537,6 +540,7 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;}
     <span id="liveLabel">OFFLINE</span>
   </div>
   <button class="icon-btn" id="refreshBtn" onclick="loadLive()">⟳ LIVE</button>
+  <button class="icon-btn" id="tgTestBtn" onclick="testTelegram()" title="Telegram Test-Nachricht senden">📱 TG</button>
   <button class="icon-btn" id="notifBtn" onclick="toggleNotif()" title="Browser-Benachrichtigungen ein/aus">🔕 AUS</button>
   <button class="icon-btn" id="soundBtn" onclick="toggleSound()" title="Sound-Alert ein/aus">🔇 AUS</button>
 </div>
@@ -548,6 +552,8 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;}
   <div class="sb-item"><div class="sb-dot" id="sbH2hDot"></div><span>H2H</span> <span class="sb-val" id="sbH2hVal">—</span></div>
   <div class="sb-sep"></div>
   <div class="sb-item"><div class="sb-dot" id="sbSheetsDot"></div><span>Sheets</span></div>
+  <div class="sb-sep"></div>
+  <div class="sb-item"><div class="sb-dot" id="sbTgDot"></div><span>Telegram</span></div>
   <div class="sb-sep"></div>
   <span id="sbNextRefresh"></span>
 </div>
@@ -681,6 +687,10 @@ async function loadHealth(){
     document.getElementById('sbH2hDot').className='sb-dot '+(h2hOk?'ok':'warn');
     document.getElementById('sbH2hVal').textContent=h2hOk?`${hzN} HZ / ${ftN} FT`:'0 — Backfill nötig';
     document.getElementById('sbSheetsDot').className='sb-dot '+(h.sheets_configured?'ok':'warn');
+    const tgDot=document.getElementById('sbTgDot');
+    if(tgDot)tgDot.className='sb-dot '+(h.telegram_configured?'ok':'warn');
+    const tgBtn=document.getElementById('tgTestBtn');
+    if(tgBtn)tgBtn.title=h.telegram_configured?'Telegram Test senden':'Telegram nicht konfiguriert';
   }catch(e){
     document.getElementById('sbApiDot').className='sb-dot err';
     document.getElementById('sbApiVal').textContent='Server schläft…';
@@ -1281,7 +1291,10 @@ function logSignal(sig,ctx=''){
   if(sig.dir!=='SKIP'){
     _doNotify(sig,ctx);
     _doTabTitle(sig);
-    if(sig.stufe==='A')_playBeep(sig.dir);
+    if(sig.stufe==='A'){
+      _playBeep(sig.dir);
+      _pushToTelegram(sig,ctx);
+    }
   }
 }
 function renderSignalLog(){
@@ -1358,6 +1371,30 @@ function _updateSoundBtn(){
   const btn=document.getElementById('soundBtn');if(!btn)return;
   btn.textContent=_soundOn?'🔊 AN':'🔇 AUS';
   btn.classList.toggle('active',_soundOn);
+}
+
+// ── Telegram Push ──
+async function _pushToTelegram(sig,ctx){
+  try{
+    await fetch('/api/telegram/push',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({...sig,label:ctx||''}),
+    });
+  }catch(e){}
+}
+async function testTelegram(){
+  const btn=document.getElementById('tgTestBtn');
+  if(btn){btn.textContent='…';btn.disabled=true;}
+  try{
+    const r=await fetch('/api/telegram/test').then(res=>res.json());
+    if(r.sent){alert('✅ Telegram Test gesendet!');}
+    else{alert('❌ Telegram nicht konfiguriert — TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID setzen.');}
+  }catch(e){
+    alert('❌ Fehler beim Telegram Test: '+e.message);
+  }finally{
+    if(btn){btn.textContent='📱 TG';btn.disabled=false;}
+  }
 }
 
 // ── Tab title alert (Stufe A only) ──
@@ -1625,7 +1662,73 @@ def _ft_engine(
     }
 
 
-# ─── Google Sheets ────────────────────────────────────────────────────────────
+# ─── Telegram Notifications ───────────────────────────────────────────────────
+
+TELEGRAM_API_BASE = "https://api.telegram.org"
+
+
+def _fmt_buf(buf: float) -> str:
+    return f"+{buf:.1f}" if buf >= 0 else f"{buf:.1f}"
+
+
+def _format_signal_msg(sig: dict, label: str = "") -> str:
+    """Format a signal result dict into a readable Telegram HTML message."""
+    dir_ = sig.get("dir", "?")
+    if dir_ == "UNDER":
+        emoji = "🔵"
+    elif dir_ == "OVER":
+        emoji = "🔴"
+    else:
+        emoji = "⚪"
+
+    buf     = sig.get("buffer")
+    buf_str = _fmt_buf(buf) if buf is not None else "—"
+    proj    = sig.get("proj")
+    fouls   = sig.get("fouls")
+
+    lines: list[str] = [
+        f"{emoji} <b>{dir_} · STUFE {sig.get('stufe','?')} · {sig.get('type','?')}</b>",
+    ]
+    if label:
+        lines.append(label)
+    lines.append(
+        f"Proj: {proj if proj is not None else '—'} | Buffer: {buf_str}"
+        + (f" | Fouls: {fouls}" if fouls is not None else "")
+    )
+    time_left = sig.get("time_left")
+    if time_left is not None:
+        lines.append(f"Zeit Q2: {time_left}min")
+
+    reasons = sig.get("reasons") or []
+    for r in reasons:
+        lines.append(f"• {r}")
+
+    return "\n".join(lines)
+
+
+async def _send_telegram(text: str) -> bool:
+    """
+    Send a message via the Telegram Bot API.
+    Returns True on success, False if not configured or on error.
+    """
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return False
+    try:
+        url    = f"{TELEGRAM_API_BASE}/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        client = _http_client or httpx.AsyncClient(timeout=API_TIMEOUT)
+        resp   = await client.post(url, json={
+            "chat_id":    TELEGRAM_CHAT_ID,
+            "text":       text,
+            "parse_mode": "HTML",
+        })
+        if not resp.is_success:
+            log.warning("Telegram send failed: %s — %s", resp.status_code, resp.text[:200])
+            return False
+        log.info("📱 Telegram message sent")
+        return True
+    except Exception as e:
+        log.warning("Telegram error: %s", e)
+        return False
 
 def _matchup_key(home: str, away: str) -> str:
     return "|".join(sorted([home.lower().strip(), away.lower().strip()]))
@@ -1899,12 +2002,13 @@ async def root():
 @app.get("/api/health")
 async def health():
     return {
-        "status":            "ok",
-        "api_key_set":       bool(API_KEY),
-        "sheets_configured": bool(SHEETS_ID and CREDS_JSON),
-        "hz_matchups":       len(_h2h_cache),
-        "ft_matchups":       len(_ft_h2h_cache),
-        "seen_ft_ids":       len(_seen_ft_ids),
+        "status":              "ok",
+        "api_key_set":         bool(API_KEY),
+        "sheets_configured":   bool(SHEETS_ID and CREDS_JSON),
+        "telegram_configured": bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID),
+        "hz_matchups":         len(_h2h_cache),
+        "ft_matchups":         len(_ft_h2h_cache),
+        "seen_ft_ids":         len(_seen_ft_ids),
     }
 
 
@@ -2132,7 +2236,108 @@ async def signal_ft(
     )
 
 
-@app.get("/api/backfill")
+# ─── Telegram Endpoints ───────────────────────────────────────────────────────
+
+@app.get("/api/telegram/test")
+async def telegram_test():
+    """
+    Send a test message to the configured Telegram chat.
+    Use this to verify TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are correct.
+    """
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        raise HTTPException(
+            status_code=400,
+            detail="TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be configured",
+        )
+    ok = await _send_telegram("🏀 <b>HZ/FT Trading — Telegram OK!</b>\nBenachrichtigungen sind aktiv.")
+    if not ok:
+        raise HTTPException(status_code=502, detail="Telegram API call failed — check token and chat_id")
+    return {"sent": True, "chat_id": TELEGRAM_CHAT_ID}
+
+
+@app.post("/api/telegram/push")
+async def telegram_push(payload: dict = Body(...)):
+    """
+    Push a pre-computed signal to Telegram.
+    Called by the frontend after calculating a Stufe-A signal.
+
+    Expected payload fields (same shape as _hz_engine / _ft_engine output):
+      dir, stufe, type, proj, buffer, time_left, fouls, reasons — plus optional 'label' (game context).
+    """
+    dir_ = payload.get("dir", "SKIP")
+    if dir_ == "SKIP":
+        return {"sent": False, "reason": "skip_signal"}
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return {"sent": False, "reason": "telegram_not_configured"}
+    label = payload.get("label", "")
+    msg   = _format_signal_msg(payload, label)
+    ok    = await _send_telegram(msg)
+    return {"sent": ok}
+
+
+@app.get("/api/live-scan")
+async def live_scan():
+    """
+    Scan all live HZ/Q3BT games and send a Telegram summary when games are found.
+    Call this from an external cron job (e.g. every 2–5 minutes) to receive
+    automatic alerts whenever games enter the halftime or Q3 break window.
+
+    No bookie lines required — this is a 'games need attention' notification.
+    Returns the list of live games found regardless of Telegram config.
+    """
+    if not API_KEY:
+        return {"hz": [], "q3": [], "count": 0, "telegram_sent": False, "source": "no_api_key"}
+
+    results = await asyncio.gather(
+        *[_fetch_live_for_league(lid, name, season)
+          for lid, (name, season) in LEAGUES.items()],
+        return_exceptions=True,
+    )
+
+    hz_games: list = []
+    q3_games: list = []
+    seen_ids: set  = set()
+
+    for r in results:
+        if not isinstance(r, tuple):
+            continue
+        hz, q3, _ = r
+        for g in hz:
+            if g["id"] not in seen_ids:
+                seen_ids.add(g["id"])
+                hz_games.append(g)
+        for g in q3:
+            if g["id"] not in seen_ids:
+                seen_ids.add(g["id"])
+                q3_games.append(g)
+
+    sent = False
+    if (hz_games or q3_games) and TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+        lines: list[str] = ["🏀 <b>Live Scan — Signal-Fenster offen</b>"]
+        if hz_games:
+            lines.append("\n<b>HZ · Halbzeit / Q2:</b>")
+            for g in hz_games:
+                status = g.get("status", "?")
+                pts    = g.get("ht_total", 0) or g.get("q2_live", 0)
+                timer  = g.get("timer")
+                t_str  = f" · Q2 {timer}min" if (status == "Q2" and timer) else f" · {status}"
+                lines.append(f"• {g['home']} vs {g['away']} ({g['league_name']}){t_str} — {pts}pts live")
+        if q3_games:
+            lines.append("\n<b>FT · Q3 Break:</b>")
+            for g in q3_games:
+                pts = g.get("ht_total", 0) + g.get("q3_home", 0) + g.get("q3_away", 0)
+                lines.append(f"• {g['home']} vs {g['away']} ({g['league_name']}) — {pts}pts")
+        lines.append("\nJetzt App öffnen → Signal berechnen!")
+        sent = await _send_telegram("\n".join(lines))
+
+    log.info("Live scan — HZ:%d  Q3:%d  telegram_sent:%s", len(hz_games), len(q3_games), sent)
+    return {
+        "hz":            hz_games,
+        "q3":            q3_games,
+        "count":         len(hz_games) + len(q3_games),
+        "telegram_sent": sent,
+        "source":        "live",
+    }
 async def backfill(
     days:   int = Query(default=7, ge=1, le=BACKFILL_MAX_DAYS),
     offset: int = Query(default=0, ge=0, le=180),
