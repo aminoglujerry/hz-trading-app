@@ -3,7 +3,8 @@ services:
     name: hz-trading-app
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    startCommand: python app.py
+    healthCheckPath: /api/health
     envVars:
       - key: API_SPORTS_KEY
         sync: false

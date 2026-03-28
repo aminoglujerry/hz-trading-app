@@ -14,6 +14,7 @@ import httpx
 import json
 import logging
 import os
+import uvicorn
 from typing import Optional
 from datetime import date as _date, timedelta
 
@@ -1649,7 +1650,10 @@ async def _extract_ft_games(date_str: Optional[str] = None) -> int:
 # ─── Background Scheduler ─────────────────────────────────────────────────────
 
 async def _scheduler_loop() -> None:
-    await asyncio.to_thread(_load_h2h_from_sheet)
+    try:
+        await asyncio.to_thread(_load_h2h_from_sheet)
+    except Exception as e:
+        log.warning("Initial H2H load failed: %s", e)
     while True:
         try:
             await _extract_ft_games()
@@ -2114,3 +2118,14 @@ def _demo_today() -> list:
          "q3_home": 0, "q3_away": 0,
          "total_home": 0, "total_away": 0, "q1_total": 0, "q2_live": 0, "ht_total": 0},
     ]
+
+
+# ─── Entry Point ──────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    try:
+        _port = int(os.environ.get("PORT", "10000"))
+    except ValueError:
+        log.error("PORT environment variable must be a valid integer; defaulting to 10000")
+        _port = 10000
+    uvicorn.run("app:app", host="0.0.0.0", port=_port, log_level="info")
