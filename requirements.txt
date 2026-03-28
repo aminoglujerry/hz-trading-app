@@ -1,3 +1,5 @@
 fastapi
 httpx
 uvicorn
+gspread
+google-auth-oauthlib
