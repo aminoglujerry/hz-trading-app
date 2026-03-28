@@ -35,7 +35,7 @@ Alle in Render unter **Environment** setzen:
 1. Repo auf GitHub pushen
 2. Render → **New Web Service** → Repo verbinden
 3. **Build Command**: `pip install -r requirements.txt`
-4. **Start Command**: `uvicorn app:app --host 0.0.0.0 --port $PORT`
+4. **Start Command**: `python app.py`
 5. Environment Variables setzen (siehe oben)
 6. Deploy
 
