@@ -852,7 +852,7 @@ async def _extract_ft_games(date_str: str | None = None) -> int:
         ws = await asyncio.to_thread(_get_worksheet)
         if ws:
             try:
-                await asyncio.to_thread(ws.append_rows, new_rows, value_input_option="USER_ENTERED")
+                await asyncio.to_thread(ws.append_rows, new_rows, value_input_option="RAW")
                 logging.info("Wrote %d rows (%s)", len(new_rows), target)
             except Exception as e:
                 logging.warning("Sheets write failed: %s", e)
