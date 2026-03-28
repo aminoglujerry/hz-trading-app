@@ -466,6 +466,52 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;}
 .wl-star.vis{display:inline;}
 .h2h-missing{color:var(--over);}
 
+/* ── Signal Log ── */
+.sig-log-section{
+  border-top:1px solid var(--border);
+  display:flex;flex-direction:column;
+  max-height:190px;flex-shrink:0;
+}
+.sig-log-header{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:5px 14px;font-size:9px;letter-spacing:1px;text-transform:uppercase;
+  color:var(--dim2);border-bottom:1px solid var(--border);flex-shrink:0;
+}
+.log-clear-btn{
+  background:none;border:none;cursor:pointer;
+  color:var(--dim);font-size:9px;letter-spacing:1px;
+  text-transform:uppercase;padding:1px 4px;
+}
+.log-clear-btn:hover{color:var(--over);}
+.sig-log-inner{
+  overflow-y:auto;flex:1;
+  scrollbar-width:thin;scrollbar-color:var(--border2) transparent;
+}
+.sig-log-inner::-webkit-scrollbar{width:3px;}
+.sig-log-inner::-webkit-scrollbar-thumb{background:var(--border2);}
+.sig-log-entry{
+  display:flex;align-items:center;gap:6px;
+  padding:4px 14px;border-bottom:1px solid var(--border);
+  font-size:9px;
+}
+.sig-log-entry:last-child{border-bottom:none;}
+.sig-log-time{color:var(--dim);min-width:40px;flex-shrink:0;font-size:8px;}
+.sig-log-dir{
+  font-family:'Barlow Condensed',sans-serif;font-weight:700;
+  font-size:11px;letter-spacing:1px;flex-shrink:0;
+}
+.sig-log-dir.under{color:var(--under);}
+.sig-log-dir.over{color:var(--over);}
+.sig-log-dir.skip{color:var(--dim);}
+.sig-log-stufe{font-size:8px;padding:1px 4px;border:1px solid;flex-shrink:0;}
+.sig-log-stufe.a{color:var(--green);border-color:rgba(45,198,83,.3);}
+.sig-log-stufe.b{color:var(--gold);border-color:rgba(244,162,97,.3);}
+.sig-log-stufe.c{color:var(--dim);border-color:var(--border);}
+.sig-log-type{color:var(--dim2);font-size:8px;flex-shrink:0;}
+.sig-log-buf{color:var(--text);flex-shrink:0;}
+.sig-log-ctx{color:var(--dim);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:8px;}
+.icon-btn.active{border-color:var(--green);color:var(--green);}
+
 /* Mobile */
 @media(max-width:800px){
   html,body{overflow:auto;}
@@ -474,6 +520,7 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;}
   .today-section{max-height:60vh;}
   .signal-card{position:sticky;top:calc(var(--topbar-h)+var(--statusbar-h));z-index:100;}
   .sig-dir{font-size:36px;}
+  .sig-log-section{max-height:140px;}
 }
 </style>
 </head>
@@ -490,6 +537,8 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;}
     <span id="liveLabel">OFFLINE</span>
   </div>
   <button class="icon-btn" id="refreshBtn" onclick="loadLive()">⟳ LIVE</button>
+  <button class="icon-btn" id="notifBtn" onclick="toggleNotif()" title="Browser-Benachrichtigungen ein/aus">🔕 AUS</button>
+  <button class="icon-btn" id="soundBtn" onclick="toggleSound()" title="Sound-Alert ein/aus">🔇 AUS</button>
 </div>
 
 <!-- Status bar -->
@@ -594,6 +643,17 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;}
 
     <!-- Hidden — kept for JS compatibility -->
     <div style="display:none" id="ftTodayWrap"></div>
+
+    <!-- Signal Log — session history of calculated signals -->
+    <div class="sig-log-section">
+      <div class="sig-log-header">
+        <span>Signal Log <span class="sec-badge" id="logCount">0</span></span>
+        <button class="log-clear-btn" onclick="clearLog()">✕ leeren</button>
+      </div>
+      <div class="sig-log-inner" id="sigLogWrap">
+        <div class="empty" style="font-size:10px;padding:8px 14px;">Noch kein Signal berechnet</div>
+      </div>
+    </div>
 
   </div><!-- /right-panel -->
 </div><!-- /app-shell -->
@@ -797,7 +857,7 @@ function calcManualHz(){
   const h2h=parseFloat(document.getElementById('hH2H').value)||null;
   const line=parseFloat(document.getElementById('hLine').value);
   if(!line){alert('Bookie Line ist Pflicht!');return;}
-  renderSignal(hzEngine({h2h,line,
+  const sig=hzEngine({h2h,line,
     q1:parseFloat(document.getElementById('hQ1').value)||0,
     q2:parseFloat(document.getElementById('hQ2').value)||0,
     timer:parseFloat(document.getElementById('hTimer').value)||0,
@@ -806,12 +866,14 @@ function calcManualHz(){
     fg:parseFloat(document.getElementById('hFG').value)||null,
     lineDrop:document.getElementById('chkDrop').classList.contains('on'),
     lineRise:document.getElementById('chkRise').classList.contains('on'),
-  }));
+  });
+  renderSignal(sig);
+  logSignal(sig,'Manuell HZ');
 }
 function calcManualFt(){
   const line=parseFloat(document.getElementById('fLine').value);
   if(!line){alert('FT Bookie Line ist Pflicht!');return;}
-  renderSignal(ftEngine({
+  const sig=ftEngine({
     h2h:parseFloat(document.getElementById('fH2H').value)||null,
     line,
     q3h:parseFloat(document.getElementById('fQ3H').value)||0,
@@ -820,7 +882,9 @@ function calcManualFt(){
     fouls:parseFloat(document.getElementById('fFouls').value)||0,
     ftPctH:parseFloat(document.getElementById('fFTH').value)||null,
     ftPctA:parseFloat(document.getElementById('fFTA').value)||null,
-  }));
+  });
+  renderSignal(sig);
+  logSignal(sig,'Manuell FT');
 }
 
 // ── HZ Cards ──
@@ -912,6 +976,9 @@ function calcHzCard(id,q1,q2live,timer,isHT=false){
   sEl.className=`card-stufe-badge ${sig.stufe.toLowerCase()}`;
   sEl.textContent=sig.stufe==='C'?'SKIP':sig.stufe;
   renderSignal(sig);
+  const teams=card?.querySelectorAll('.card-team');
+  const ctx=teams&&teams.length>=2?teams[0].textContent+' / '+teams[1].textContent:'Spiel #'+id;
+  logSignal(sig,ctx);
 }
 
 // ── Today list ──
@@ -1024,6 +1091,9 @@ function calcFtCard(id,hz,q3h,q3a){
   sEl.className=`card-stufe-badge ${sig.stufe.toLowerCase()}`;
   sEl.textContent=sig.stufe==='C'?'SKIP':sig.stufe;
   renderSignal(sig);
+  const ftTeams=card?.querySelectorAll('.card-team');
+  const ftCtx=ftTeams&&ftTeams.length>=2?ftTeams[0].textContent+' / '+ftTeams[1].textContent:'Spiel #'+id;
+  logSignal(sig,ftCtx);
 }
 function renderFtToday(games){
   // kept for JS compatibility — today section shows all games incl. FT
@@ -1195,6 +1265,111 @@ function _liveFt(){
   },400);
 }
 
+// ── Signal Log ──
+const _signalLog=[];
+const _MAX_LOG=50;
+function _tsNow(){
+  const d=new Date();
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
+}
+function logSignal(sig,ctx=''){
+  const entry={ts:_tsNow(),dir:sig.dir,stufe:sig.stufe,type:sig.type||'HZ',buf:sig.buffer,ctx};
+  _signalLog.unshift(entry);
+  if(_signalLog.length>_MAX_LOG)_signalLog.length=_MAX_LOG;
+  document.getElementById('logCount').textContent=_signalLog.length;
+  renderSignalLog();
+  if(sig.dir!=='SKIP'){
+    _doNotify(sig,ctx);
+    _doTabTitle(sig);
+    if(sig.stufe==='A')_playBeep(sig.dir);
+  }
+}
+function renderSignalLog(){
+  const w=document.getElementById('sigLogWrap');
+  if(!_signalLog.length){
+    w.innerHTML='<div class="empty" style="font-size:10px;padding:8px 14px;">Noch kein Signal berechnet</div>';
+    return;
+  }
+  w.innerHTML=_signalLog.map(e=>`<div class="sig-log-entry">
+    <span class="sig-log-time">${e.ts}</span>
+    <span class="sig-log-dir ${e.dir.toLowerCase()}">${e.dir}</span>
+    <span class="sig-log-stufe ${e.stufe.toLowerCase()}">ST-${e.stufe}</span>
+    <span class="sig-log-type">${e.type}</span>
+    <span class="sig-log-buf">${e.buf!=null?(e.buf>=0?'+':'')+e.buf.toFixed(1):'—'}</span>
+    ${e.ctx?`<span class="sig-log-ctx">${e.ctx}</span>`:''}
+  </div>`).join('');
+}
+function clearLog(){
+  _signalLog.length=0;
+  document.getElementById('logCount').textContent=0;
+  renderSignalLog();
+}
+
+// ── Browser Notifications ──
+let _notifOn=localStorage.getItem('hz_notif')==='1';
+function toggleNotif(){
+  if(!_notifOn){
+    Notification.requestPermission().then(p=>{
+      _notifOn=p==='granted';
+      localStorage.setItem('hz_notif',_notifOn?'1':'0');
+      _updateNotifBtn();
+    });
+  }else{
+    _notifOn=false;localStorage.setItem('hz_notif','0');_updateNotifBtn();
+  }
+}
+function _updateNotifBtn(){
+  const btn=document.getElementById('notifBtn');if(!btn)return;
+  btn.textContent=_notifOn?'🔔 AN':'🔕 AUS';
+  btn.classList.toggle('active',_notifOn);
+}
+function _doNotify(sig,ctx){
+  if(!_notifOn||Notification.permission!=='granted')return;
+  const title=`${sig.dir} STUFE ${sig.stufe} · ${sig.type}`;
+  const buf=sig.buffer!=null?(sig.buffer>=0?'+':'')+sig.buffer.toFixed(1):'—';
+  const body=`Buffer: ${buf}${ctx?' · '+ctx:''}`;
+  try{new Notification(title,{body,tag:'hz-signal'});}catch(e){}
+}
+
+// ── Sound Alerts ──
+let _soundOn=localStorage.getItem('hz_sound')==='1';
+let _audioCtx=null;
+function _getAudioCtx(){
+  if(!_audioCtx){try{_audioCtx=new(window.AudioContext||window.webkitAudioContext)();}catch(e){}}
+  return _audioCtx;
+}
+function _playBeep(dir){
+  if(!_soundOn)return;
+  const ctx=_getAudioCtx();if(!ctx)return;
+  const freq=dir==='UNDER'?880:620;
+  const osc=ctx.createOscillator();const gain=ctx.createGain();
+  osc.connect(gain);gain.connect(ctx.destination);
+  osc.type='sine';osc.frequency.value=freq;
+  gain.gain.setValueAtTime(0.25,ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.45);
+  osc.start(ctx.currentTime);osc.stop(ctx.currentTime+0.45);
+}
+function toggleSound(){
+  _soundOn=!_soundOn;localStorage.setItem('hz_sound',_soundOn?'1':'0');
+  _updateSoundBtn();
+  if(_soundOn)_playBeep('UNDER');
+}
+function _updateSoundBtn(){
+  const btn=document.getElementById('soundBtn');if(!btn)return;
+  btn.textContent=_soundOn?'🔊 AN':'🔇 AUS';
+  btn.classList.toggle('active',_soundOn);
+}
+
+// ── Tab title alert (Stufe A only) ──
+let _tabRestoreTimer=null;
+function _doTabTitle(sig){
+  if(sig.stufe!=='A')return;
+  const icon=sig.dir==='UNDER'?'▾':'▴';
+  document.title=`${icon} ${sig.dir} · HZ/FT Trading`;
+  clearTimeout(_tabRestoreTimer);
+  _tabRestoreTimer=setTimeout(()=>{document.title='HZ / FT Trading';},12000);
+}
+
 // ── Startup ──
 document.addEventListener('DOMContentLoaded',()=>{
   // open HZ manual form by default
@@ -1213,6 +1388,9 @@ document.addEventListener('DOMContentLoaded',()=>{
 
   // health check first, then load live data
   loadHealth().then(()=>loadLive());
+  // initialise toggle button states from saved preferences
+  _updateNotifBtn();
+  _updateSoundBtn();
 });
 </script>
 </body>
