@@ -429,6 +429,39 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;}
   font-size:17px;font-weight:900;color:var(--white);}
 .today-q{font-size:8px;color:var(--dim2);margin-top:1px;text-align:center;}
 
+/* ── Preview (NS) cards ── */
+.preview-card{
+  background:var(--s2);border:1px solid var(--border);
+  display:grid;grid-template-columns:3px 1fr;
+}
+.preview-card.no-h2h{opacity:.5;}
+.preview-card.wl-active{border-color:rgba(244,162,97,.35);}
+.pre-card-body{padding:9px 11px;}
+.pre-card-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;}
+.pre-card-teams{display:grid;grid-template-columns:1fr auto 1fr;gap:4px;align-items:center;margin-bottom:7px;}
+.pre-line-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
+.pre-line-row label{font-size:8px;letter-spacing:1px;color:var(--dim2);text-transform:uppercase;white-space:nowrap;}
+.pre-line-row input{
+  background:var(--bg);border:1px solid var(--border2);color:var(--white);
+  font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:600;
+  padding:4px 7px;outline:none;width:90px;
+}
+.pre-line-row input:focus{border-color:var(--gold);}
+.pre-card-bot{display:flex;justify-content:space-between;align-items:center;
+  padding-top:6px;border-top:1px solid var(--border);}
+.pre-sig-badge{font-size:9px;font-weight:700;letter-spacing:1px;padding:2px 7px;border:1px solid;}
+.pre-sig-badge.under{color:var(--under);border-color:rgba(0,180,216,.3);}
+.pre-sig-badge.over{color:var(--over);border-color:rgba(230,57,70,.3);}
+.pre-sig-badge.neutral{color:var(--dim2);border-color:var(--border);}
+.watch-btn{
+  background:none;border:none;cursor:pointer;font-size:14px;
+  color:var(--dim);padding:1px 4px;line-height:1;transition:color .15s;}
+.watch-btn:hover{color:var(--gold);}
+.watch-btn.active{color:var(--gold);}
+.wl-star{font-size:11px;color:var(--gold);margin-left:5px;display:none;vertical-align:middle;}
+.wl-star.vis{display:inline;}
+.h2h-missing{color:var(--over);}
+
 /* Mobile */
 @media(max-width:800px){
   html,body{overflow:auto;}
@@ -479,6 +512,11 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;}
     <div class="sec">FT · Q3 Break <span class="sec-badge" id="ftCount">0</span></div>
     <div class="games-wrap" id="ftGamesWrap">
       <div class="empty">⟳ Klicke LIVE — zeigt Spiele am Q3 Break</div>
+    </div>
+
+    <div class="sec">Heute · Vorschau <span class="sec-badge" id="previewCount">0</span></div>
+    <div class="games-wrap" id="previewWrap">
+      <div class="empty">⟳ Klicke LIVE um Vorschau zu laden</div>
     </div>
   </div>
 
@@ -627,6 +665,7 @@ async function loadLive(silent=false){
     renderToday(d.today||[]);
     renderFtCandidates(d.q3||[]);
     renderFtToday(d.today||[]);
+    renderPreview(d.today||[]);
     const liveCount=(d.games||[]).length+(d.q3||[]).length;
     setLive(d.source==='live'&&(d.count||0)>0,liveCount);
     document.getElementById('hzCount').textContent=(d.games||[]).length;
@@ -785,6 +824,7 @@ function renderHzGames(games){
   const w=document.getElementById('gamesWrap');
   if(!games.length){w.innerHTML='<div class="empty">Keine HT/Q2 Spiele live<br><span style="font-size:9px;color:var(--dim)">EU-Ligen meist 18–22 Uhr</span></div>';return;}
   w.innerHTML=games.map(g=>hzCard(g)).join('');
+  applyWatchlistUI();
 }
 function hzCard(g){
   const isHT=g.status==='HT';
@@ -793,7 +833,7 @@ function hzCard(g){
   return`<div class="game-card" id="gc-${g.id}" onclick="selectHzCard(${g.id},${JSON.stringify(g.home).replace(/"/g,'&quot;')},${JSON.stringify(g.away).replace(/"/g,'&quot;')})">
     <div class="card-stripe"></div>
     <div class="card-body">
-      <div class="card-top"><span class="card-league">${g.league_name}</span><span class="card-status">${label}</span></div>
+      <div class="card-top"><span class="card-league">${g.league_name}</span><div style="display:flex;align-items:center;gap:5px;"><span class="wl-star" id="wl-${g.id}" data-id="${g.id}">★</span><span class="card-status">${label}</span></div></div>
       <div class="card-teams">
         <div class="card-team">${g.home}</div>
         <div class="score-block"><div class="score-num">${g.total_home}–${g.total_away}</div><div class="score-q1">Q1: ${g.q1_home}–${g.q1_away}</div></div>
@@ -893,6 +933,7 @@ function renderFtCandidates(games){
   const w=document.getElementById('ftGamesWrap');
   if(!games.length){w.innerHTML='<div class="empty">Keine Spiele am Q3 Break</div>';return;}
   w.innerHTML=games.map(g=>ftCard(g)).join('');
+  applyWatchlistUI();
 }
 function ftCard(g){
   const q3tot=(g.q3_home||0)+(g.q3_away||0);
@@ -900,7 +941,7 @@ function ftCard(g){
   return`<div class="ft-card" id="ftc-${g.id}" onclick="selectFtCard(${g.id},${JSON.stringify(g.home).replace(/"/g,'&quot;')},${JSON.stringify(g.away).replace(/"/g,'&quot;')})">
     <div class="card-stripe"></div>
     <div class="ft-body">
-      <div class="card-top"><span class="card-league">${g.league_name}</span><span class="card-status">Q3 BREAK</span></div>
+      <div class="card-top"><span class="card-league">${g.league_name}</span><div style="display:flex;align-items:center;gap:5px;"><span class="wl-star" id="wl-${g.id}" data-id="${g.id}">★</span><span class="card-status">Q3 BREAK</span></div></div>
       <div class="card-teams">
         <div class="card-team">${g.home}</div>
         <div class="score-block"><div class="score-num">${g.total_home}–${g.total_away}</div><div class="score-q1">HZ:${g.ht_total} Gap:${gap}</div></div>
@@ -986,6 +1027,112 @@ function renderFtToday(games){
   if(!w)return;
   const done=games.filter(g=>g.status==='FT');
   w.innerHTML=done.map(g=>`<div>${g.home} vs ${g.away} — ${g.total_home+g.total_away}</div>`).join('');
+}
+
+// ── Watchlist ──
+const _watchlist=new Set(JSON.parse(localStorage.getItem('hz_wl')||'[]'));
+function _saveWatchlist(){localStorage.setItem('hz_wl',JSON.stringify([..._watchlist]));}
+function toggleWatchlist(id){
+  const btn=document.getElementById('wbtn-'+id);
+  const card=document.getElementById('pvc-'+id);
+  if(_watchlist.has(id)){
+    _watchlist.delete(id);
+    if(btn)btn.classList.remove('active');
+    if(card)card.classList.remove('wl-active');
+  }else{
+    _watchlist.add(id);
+    if(btn)btn.classList.add('active');
+    if(card)card.classList.add('wl-active');
+  }
+  _saveWatchlist();
+  applyWatchlistUI();
+}
+function applyWatchlistUI(){
+  document.querySelectorAll('.wl-star').forEach(el=>{
+    const id=parseInt(el.dataset.id);
+    el.classList.toggle('vis',_watchlist.has(id));
+  });
+}
+
+// ── Pre-Game Preview ──
+function renderPreview(games){
+  const ns=games.filter(g=>g.status==='NS');
+  document.getElementById('previewCount').textContent=ns.length;
+  const w=document.getElementById('previewWrap');
+  if(!ns.length){w.innerHTML='<div class="empty">Keine Spiele anstehend</div>';return;}
+  w.innerHTML=ns.map(g=>previewCard(g)).join('');
+  ns.forEach(g=>loadPreviewH2h(g));
+  applyWatchlistUI();
+}
+function previewCard(g){
+  const isWl=_watchlist.has(g.id);
+  return`<div class="preview-card no-h2h${isWl?' wl-active':''}" id="pvc-${g.id}">
+    <div class="card-stripe"></div>
+    <div class="pre-card-body">
+      <div class="pre-card-top">
+        <span class="card-league">${g.league_name}</span>
+        <div style="display:flex;align-items:center;gap:4px;">
+          <span style="font-size:9px;color:var(--dim2);letter-spacing:1px;">NS</span>
+          <button class="watch-btn${isWl?' active':''}" id="wbtn-${g.id}"
+            onclick="event.stopPropagation();toggleWatchlist(${g.id})" title="Watchlist">★</button>
+        </div>
+      </div>
+      <div class="pre-card-teams">
+        <div class="card-team">${g.home}</div>
+        <div class="score-block"><div style="font-size:10px;color:var(--dim2);text-align:center;">vs</div></div>
+        <div class="card-team away">${g.away}</div>
+      </div>
+      <div class="pre-line-row">
+        <label>HZ Line</label>
+        <input type="number" id="pvline-${g.id}" placeholder="91.5" step="0.5" inputmode="decimal"
+          oninput="calcPreSignal(${g.id})">
+      </div>
+      <div class="pre-card-bot">
+        <span class="h2h-note" id="pvh2h-${g.id}">H2H lädt…</span>
+        <span class="pre-sig-badge neutral" id="pvbadge-${g.id}">—</span>
+      </div>
+    </div>
+  </div>`;
+}
+async function loadPreviewH2h(g){
+  try{
+    const d=await fetch(`/api/h2h?home=${encodeURIComponent(g.home)}&away=${encodeURIComponent(g.away)}`).then(r=>r.json());
+    const note=document.getElementById('pvh2h-'+g.id);
+    const card=document.getElementById('pvc-'+g.id);
+    if(!note||!card)return;
+    if(d.found){
+      note.textContent=`H2H Ø ${d.avg} (${d.count}×)`;
+      note.className='h2h-note found';
+      card.classList.remove('no-h2h');
+      card.dataset.h2h=d.avg;
+      calcPreSignal(g.id);
+    }else{
+      note.innerHTML='<span class="h2h-missing">H2H fehlt — Backfill nötig</span>';
+      note.className='h2h-note';
+    }
+  }catch(e){
+    const note=document.getElementById('pvh2h-'+g.id);
+    if(note)note.textContent='H2H: Fehler';
+  }
+}
+function calcPreSignal(id){
+  const card=document.getElementById('pvc-'+id);
+  const badge=document.getElementById('pvbadge-'+id);
+  if(!card||!badge)return;
+  const h2h=parseFloat(card.dataset.h2h);
+  const line=parseFloat(document.getElementById('pvline-'+id)?.value);
+  if(!Number.isFinite(h2h)||!Number.isFinite(line)||h2h===0||line===0){badge.textContent='—';badge.className='pre-sig-badge neutral';return;}
+  const buf=+(h2h-line).toFixed(1);
+  if(buf>=5){
+    badge.textContent=`UNDER ▾ +${buf}`;
+    badge.className='pre-sig-badge under';
+  }else if(buf<=-5){
+    badge.textContent=`OVER ▴ ${buf}`;
+    badge.className='pre-sig-badge over';
+  }else{
+    badge.textContent=`NEUTRAL ${buf>=0?'+':''}${buf}`;
+    badge.className='pre-sig-badge neutral';
+  }
 }
 
 // ── Live calculation while typing (debounced 400ms) ──
@@ -1922,4 +2069,14 @@ def _demo_today() -> list:
          "q1_home": 26, "q1_away": 21, "q2_home": 22, "q2_away": 24,
          "q3_home": 0,  "q3_away": 0,
          "total_home": 88, "total_away": 79, "q1_total": 47, "q2_live": 46, "ht_total": 93},
+        {"id": 3002, "league_id": 4, "league_name": "ACB", "status": "NS", "timer": None,
+         "home": "Real Madrid", "away": "Valencia Basket",
+         "q1_home": 0, "q1_away": 0, "q2_home": 0, "q2_away": 0,
+         "q3_home": 0, "q3_away": 0,
+         "total_home": 0, "total_away": 0, "q1_total": 0, "q2_live": 0, "ht_total": 0},
+        {"id": 3003, "league_id": 3, "league_name": "EuroLeague", "status": "NS", "timer": None,
+         "home": "Fenerbahce", "away": "Olympiacos",
+         "q1_home": 0, "q1_away": 0, "q2_home": 0, "q2_away": 0,
+         "q3_home": 0, "q3_away": 0,
+         "total_home": 0, "total_away": 0, "q1_total": 0, "q2_live": 0, "ht_total": 0},
     ]
