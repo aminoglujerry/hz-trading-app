@@ -173,7 +173,7 @@ HTML = r"""<!DOCTYPE html>
   --border:#1a1b24;--border2:#252630;
   --text:#c9cdd8;--dim:#3e4055;--dim2:#555770;
   --under:#00b4d8;--over:#e63946;--green:#2dc653;--gold:#f4a261;--white:#f0f1f5;
-  --panel-w:340px;--topbar-h:48px;
+  --panel-w:340px;--topbar-h:48px;--statusbar-h:26px;
 }
 *{margin:0;padding:0;box-sizing:border-box;}
 html,body{height:100%;overflow:hidden;}
@@ -205,12 +205,29 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;}
 .icon-btn:hover,.icon-btn:disabled{border-color:var(--green);color:var(--green);}
 .icon-btn:disabled{opacity:.5;cursor:default;}
 
+/* ── Status bar ── */
+.statusbar{
+  position:fixed;top:var(--topbar-h);left:0;right:0;z-index:299;
+  height:var(--statusbar-h);background:var(--s3);
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;padding:0 16px;gap:16px;
+  font-size:9px;letter-spacing:1px;text-transform:uppercase;
+}
+.sb-item{display:flex;align-items:center;gap:5px;color:var(--dim2);}
+.sb-dot{width:5px;height:5px;border-radius:50%;background:var(--dim);}
+.sb-dot.ok{background:var(--green);}
+.sb-dot.warn{background:var(--gold);}
+.sb-dot.err{background:var(--over);}
+.sb-val{color:var(--text);}
+.sb-sep{width:1px;height:12px;background:var(--border2);}
+#sbNextRefresh{color:var(--dim);}
+
 /* ── App shell ── */
 .app-shell{
   display:grid;
   grid-template-columns:1fr var(--panel-w);
   height:100vh;
-  padding-top:var(--topbar-h);
+  padding-top:calc(var(--topbar-h) + var(--statusbar-h));
 }
 
 /* ── Games column (left) ── */
@@ -418,7 +435,7 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;}
   .app-shell{grid-template-columns:1fr;height:auto;}
   .right-panel{height:auto;border-left:none;border-top:1px solid var(--border);}
   .today-section{max-height:60vh;}
-  .signal-card{position:sticky;top:var(--topbar-h);z-index:100;}
+  .signal-card{position:sticky;top:calc(var(--topbar-h)+var(--statusbar-h));z-index:100;}
   .sig-dir{font-size:36px;}
 }
 </style>
@@ -436,6 +453,17 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;}
     <span id="liveLabel">OFFLINE</span>
   </div>
   <button class="icon-btn" id="refreshBtn" onclick="loadLive()">⟳ LIVE</button>
+</div>
+
+<!-- Status bar -->
+<div class="statusbar">
+  <div class="sb-item"><div class="sb-dot" id="sbApiDot"></div><span>API</span> <span class="sb-val" id="sbApiVal">—</span></div>
+  <div class="sb-sep"></div>
+  <div class="sb-item"><div class="sb-dot" id="sbH2hDot"></div><span>H2H</span> <span class="sb-val" id="sbH2hVal">—</span></div>
+  <div class="sb-sep"></div>
+  <div class="sb-item"><div class="sb-dot" id="sbSheetsDot"></div><span>Sheets</span></div>
+  <div class="sb-sep"></div>
+  <span id="sbNextRefresh"></span>
 </div>
 
 <!-- App Shell: Games (left) + Signal Panel (right) -->
@@ -538,18 +566,54 @@ function toggleManual(t){
   form.classList.toggle('open');
   btn.classList.toggle('open');
 }
+
+// ── Status bar ──
+async function loadHealth(){
+  try{
+    const h=await fetch('/api/health').then(r=>r.json());
+    const apiOk=h.api_key_set;
+    document.getElementById('sbApiDot').className='sb-dot '+(apiOk?'ok':'err');
+    document.getElementById('sbApiVal').textContent=apiOk?'OK':'KEY FEHLT';
+    const hzN=h.hz_matchups||0,ftN=h.ft_matchups||0;
+    const h2hOk=hzN>0;
+    document.getElementById('sbH2hDot').className='sb-dot '+(h2hOk?'ok':'warn');
+    document.getElementById('sbH2hVal').textContent=h2hOk?`${hzN} HZ / ${ftN} FT`:'0 — Backfill nötig';
+    document.getElementById('sbSheetsDot').className='sb-dot '+(h.sheets_configured?'ok':'warn');
+  }catch(e){
+    document.getElementById('sbApiDot').className='sb-dot err';
+    document.getElementById('sbApiVal').textContent='Server schläft…';
+  }
+}
+
 let _autoRefreshTimer=null;
+let _countdownTimer=null;
+let _nextRefreshAt=null;
 const AUTO_REFRESH_MS=60_000;
+
+function _startCountdown(){
+  if(_countdownTimer)clearInterval(_countdownTimer);
+  _nextRefreshAt=Date.now()+AUTO_REFRESH_MS;
+  _countdownTimer=setInterval(()=>{
+    const sec=Math.max(0,Math.round((_nextRefreshAt-Date.now())/1000));
+    document.getElementById('sbNextRefresh').textContent=sec>0?`⟳ in ${sec}s`:'';
+    if(sec===0)clearInterval(_countdownTimer);
+  },1000);
+}
+function _stopCountdown(){
+  if(_countdownTimer){clearInterval(_countdownTimer);_countdownTimer=null;}
+  document.getElementById('sbNextRefresh').textContent='';
+}
 
 function setLive(on,count){
   document.getElementById('liveDot').className='dot'+(on?' live':'');
   document.getElementById('liveLabel').textContent=on?'LIVE':'OFFLINE';
   if(count!=null)document.getElementById('liveCountNum').textContent=count;
-  // auto-refresh while live games are active, cancel when none
   if(on&&!_autoRefreshTimer){
-    _autoRefreshTimer=setInterval(()=>loadLive(true),AUTO_REFRESH_MS);
+    _autoRefreshTimer=setInterval(()=>{loadLive(true);_nextRefreshAt=Date.now()+AUTO_REFRESH_MS;},AUTO_REFRESH_MS);
+    _startCountdown();
   }else if(!on&&_autoRefreshTimer){
     clearInterval(_autoRefreshTimer);_autoRefreshTimer=null;
+    _stopCountdown();
   }
 }
 
@@ -563,9 +627,11 @@ async function loadLive(silent=false){
     renderToday(d.today||[]);
     renderFtCandidates(d.q3||[]);
     renderFtToday(d.today||[]);
-    setLive(d.source==='live'&&(d.count||0)>0, (d.games||[]).length+(d.q3||[]).length);
+    const liveCount=(d.games||[]).length+(d.q3||[]).length;
+    setLive(d.source==='live'&&(d.count||0)>0,liveCount);
     document.getElementById('hzCount').textContent=(d.games||[]).length;
     document.getElementById('ftCount').textContent=(d.q3||[]).length;
+    if(silent&&_autoRefreshTimer)_startCountdown();
   }catch(e){
     if(!silent)document.getElementById('gamesWrap').innerHTML=`<div class="empty">⚠ ${e.message}</div>`;
     setLive(false,0);
@@ -914,6 +980,65 @@ function renderFtToday(games){
   const done=games.filter(g=>g.status==='FT');
   w.innerHTML=done.map(g=>`<div>${g.home} vs ${g.away} — ${g.total_home+g.total_away}</div>`).join('');
 }
+
+// ── Live calculation while typing (debounced 400ms) ──
+let _debHz=null,_debFt=null;
+function _liveHz(){
+  clearTimeout(_debHz);
+  _debHz=setTimeout(()=>{
+    const line=parseFloat(document.getElementById('hLine').value);
+    if(!line)return;
+    renderSignal(hzEngine({
+      h2h:parseFloat(document.getElementById('hH2H').value)||null,
+      line,
+      q1:parseFloat(document.getElementById('hQ1').value)||0,
+      q2:parseFloat(document.getElementById('hQ2').value)||0,
+      timer:parseFloat(document.getElementById('hTimer').value)||0,
+      fouls:parseFloat(document.getElementById('hFouls').value)||0,
+      ft:parseFloat(document.getElementById('hFT').value)||null,
+      fg:parseFloat(document.getElementById('hFG').value)||null,
+      lineDrop:document.getElementById('chkDrop').classList.contains('on'),
+      lineRise:document.getElementById('chkRise').classList.contains('on'),
+    }));
+  },400);
+}
+function _liveFt(){
+  clearTimeout(_debFt);
+  _debFt=setTimeout(()=>{
+    const line=parseFloat(document.getElementById('fLine').value);
+    if(!line)return;
+    renderSignal(ftEngine({
+      h2h:parseFloat(document.getElementById('fH2H').value)||null,
+      line,
+      q3h:parseFloat(document.getElementById('fQ3H').value)||0,
+      q3a:parseFloat(document.getElementById('fQ3A').value)||0,
+      hz:parseFloat(document.getElementById('fHZ').value)||0,
+      fouls:parseFloat(document.getElementById('fFouls').value)||0,
+      ftPctH:parseFloat(document.getElementById('fFTH').value)||null,
+      ftPctA:parseFloat(document.getElementById('fFTA').value)||null,
+    }));
+  },400);
+}
+
+// ── Startup ──
+document.addEventListener('DOMContentLoaded',()=>{
+  // open HZ manual form by default
+  document.getElementById('manualHz').classList.add('open');
+  document.getElementById('mToggleHz').classList.add('open');
+
+  // wire live-calc listeners on all manual inputs
+  ['hH2H','hLine','hQ1','hQ2','hTimer','hFouls','hFT','hFG'].forEach(id=>{
+    document.getElementById(id).addEventListener('input',_liveHz);
+  });
+  document.getElementById('chkDrop').addEventListener('click',()=>setTimeout(_liveHz,50));
+  document.getElementById('chkRise').addEventListener('click',()=>setTimeout(_liveHz,50));
+  ['fH2H','fLine','fQ3H','fQ3A','fHZ','fFouls','fFTH','fFTA'].forEach(id=>{
+    document.getElementById(id).addEventListener('input',_liveFt);
+  });
+
+  // health check first, then load live data
+  loadHealth().then(()=>loadLive());
+});
 </script>
 </body>
 </html>"""
