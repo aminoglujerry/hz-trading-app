@@ -1,15 +1,25 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+import asyncio
 import httpx
+import json
+import logging
 import os
 from typing import Optional
 
-app = FastAPI(title="HZ Trading App")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
 
 API_KEY = os.getenv("API_SPORTS_KEY", "")
 API_BASE = "https://v1.basketball.api-sports.io"
+
+SHEETS_ID  = os.getenv("GOOGLE_SHEETS_ID", "")
+SHEETS_TAB = os.getenv("GOOGLE_SHEETS_TAB", "H2H")
+CREDS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
 
 LEAGUES = {
     120: ("BSL / TBL",  "2025-2026"),
@@ -24,6 +34,26 @@ LEAGUES = {
     22:  ("BCL",        "2025-2026"),
     12:  ("NBA",        "2025"),
 }
+
+# ---------- Google Sheets / H2H state ----------
+_h2h_cache: dict = {}   # matchup_key -> [ht_total, ...]  (halftime totals, Q1+Q2 combined)
+_seen_ft_ids: set = set()
+_ws = None               # cached gspread Worksheet
+
+
+@asynccontextmanager
+async def lifespan(app_: FastAPI):
+    task = asyncio.create_task(_scheduler_loop())
+    yield
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
+app = FastAPI(title="HZ Trading App", lifespan=lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 HTML = r"""<!DOCTYPE html>
 <html lang="de">
@@ -365,7 +395,7 @@ function todayCard(g){
 function gameCard(g){
   const timer=g.timer||0;
   const statusLabel=g.status==='HT'?'HALBZEIT':`Q2·${timer}′`;
-  return `<div class="game-card" id="gc-${g.id}" onclick="selectCard(${g.id})">
+  return `<div class="game-card" id="gc-${g.id}" onclick="selectCard(${g.id},${JSON.stringify(g.home)},${JSON.stringify(g.away)})">
     <div class="card-stripe"></div>
     <div class="card-body">
       <div class="card-top">
@@ -400,10 +430,22 @@ function gameCard(g){
   </div>`;
 }
 
-function selectCard(id){
+async function selectCard(id,home,away){
   document.querySelectorAll('.game-card').forEach(c=>{c.classList.remove('selected');const ci=c.querySelector('.card-inputs');if(ci)ci.classList.remove('open');});
   const card=document.getElementById('gc-'+id);
   if(card){card.classList.add('selected');document.getElementById('ci-'+id).classList.add('open');}
+  if(home&&away){
+    try{
+      const r=await fetch(`/api/h2h?home=${encodeURIComponent(home)}&away=${encodeURIComponent(away)}`);
+      const d=await r.json();
+      const inp=document.getElementById('ih2h-'+id);
+      if(d.found&&inp&&!inp.value){
+        inp.value=d.avg;
+        const lbl=inp.closest('.inp-group')?.querySelector('label');
+        if(lbl)lbl.textContent=`H2H Ø (${d.count}x)`;
+      }
+    }catch(e){}
+  }
 }
 
 function calcCard(id,q1,q2live,timer){
@@ -431,18 +473,31 @@ function engine({h2h,line,q1,q2,timer,fouls,ft,fg,lineDrop,lineRise}){
   let q2proj=timer>0.5&&q2>0?q2+(q2/timer)*timeLeft:q1;
   const proj=q1+q2proj;
   const buffer=proj-line;
+  // H2H historical edge: positive = historically above line (UNDER lean), negative = below line (OVER lean)
+  const h2hBuf=h2h!=null&&h2h>0?h2h-line:null;
   const foulsOC=fouls>=8,ftOC=ft!==null&&ft>=85,lineMC=lineDrop||lineRise;
-  const overCat=foulsOC||ftOC||lineMC;
+  const h2hOverCat=h2hBuf!==null&&h2hBuf<=-3;   // H2H historically below line → OVER catalyst
+  const h2hUnder=h2hBuf!==null&&h2hBuf>=0;       // H2H doesn't contradict UNDER
+  const overCat=foulsOC||ftOC||lineMC||h2hOverCat;
   const fgSkip=fg!==null&&fg>60;
   const entryOk=timeLeft>=2.5,entryA=timeLeft>=3.5;
   let dir='SKIP',stufe='C',reasons=[];
   if(buffer>=5&&entryOk&&fouls<8&&!fgSkip){
     dir='UNDER';
-    if(entryA){stufe='A';reasons=[`<span class="r-ok">✓ Buffer +${buffer.toFixed(1)} ≥ 5</span>`,`<span class="r-ok">✓ Entry ${timeLeft.toFixed(1)}′</span>`,`<span class="r-ok">✓ Fouls ${fouls} &lt; 8</span>`];}
-    else{stufe='B';reasons=[`<span class="r-warn">~ Buffer +${buffer.toFixed(1)}</span>`,`<span class="r-warn">~ Entry ${timeLeft.toFixed(1)}′</span>`];}
+    if(entryA){
+      // H2H contradicting UNDER (h2h below line — historically OVER lean) downgrades A → B
+      if(h2hBuf!==null&&h2hBuf<0){
+        stufe='B';
+        reasons=[`<span class="r-ok">✓ Buffer +${buffer.toFixed(1)} ≥ 5</span>`,`<span class="r-warn">~ H2H ${h2h} &lt; Linie (${h2hBuf.toFixed(1)}) — kontra</span>`];
+      }else{
+        stufe='A';
+        reasons=[`<span class="r-ok">✓ Buffer +${buffer.toFixed(1)} ≥ 5</span>`,`<span class="r-ok">✓ Entry ${timeLeft.toFixed(1)}′</span>`,`<span class="r-ok">✓ Fouls ${fouls} &lt; 8</span>`];
+        if(h2hBuf!==null&&h2hBuf>=3)reasons.push(`<span class="r-ok">✓ H2H +${h2hBuf.toFixed(1)} bestätigt UNDER</span>`);
+      }
+    }else{stufe='B';reasons=[`<span class="r-warn">~ Buffer +${buffer.toFixed(1)}</span>`,`<span class="r-warn">~ Entry ${timeLeft.toFixed(1)}′</span>`];}
   }else if(buffer<=-3&&entryOk){
     dir='OVER';
-    if(overCat){stufe='A';if(foulsOC)reasons.push(`<span class="r-ok">🔥 Fouls ${fouls} ≥ 8</span>`);if(ftOC)reasons.push(`<span class="r-ok">🔥 FT% ${ft}%</span>`);if(lineMC)reasons.push(`<span class="r-ok">🔥 Linie bewegt</span>`);}
+    if(overCat){stufe='A';if(foulsOC)reasons.push(`<span class="r-ok">🔥 Fouls ${fouls} ≥ 8</span>`);if(ftOC)reasons.push(`<span class="r-ok">🔥 FT% ${ft}%</span>`);if(lineMC)reasons.push(`<span class="r-ok">🔥 Linie bewegt</span>`);if(h2hOverCat)reasons.push(`<span class="r-ok">🔥 H2H ${h2hBuf.toFixed(1)} unter Linie</span>`);}
     else{stufe='B';reasons.push(`<span class="r-warn">~ ${buffer.toFixed(1)} unter Linie</span>`);reasons.push(`<span class="r-warn">~ Kein Katalysator</span>`);}
     reasons.push(`<span class="r-ok">✓ Entry ${timeLeft.toFixed(1)}′</span>`);
   }else{
@@ -532,7 +587,12 @@ async def root():
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "api_key_set": bool(API_KEY)}
+    return {
+        "status": "ok",
+        "api_key_set": bool(API_KEY),
+        "sheets_configured": bool(SHEETS_ID and CREDS_JSON),
+        "h2h_matchups": len(_h2h_cache),
+    }
 
 @app.get("/api/leagues")
 async def get_leagues():
@@ -548,6 +608,7 @@ async def get_live_games():
     live_results, today_results, seen_ids = [], [], set()
 
     for league_id, (name, season) in LEAGUES.items():
+        # Live query (HT / Q2 games) — failure here must NOT skip the today query
         try:
             data = await api_get("games", {"league": league_id, "season": season, "live": "all"})
             for g in (data.get("response") or []):
@@ -562,7 +623,9 @@ async def get_live_games():
                 else:
                     today_results.append(ng)
         except Exception:
-            continue
+            pass  # fall through to the today query below
+
+        # Today query — runs independently of live query result
         try:
             data2 = await api_get("games", {"league": league_id, "season": season, "date": today_str})
             for g in (data2.get("response") or []):
@@ -586,6 +649,18 @@ async def get_games(league: int, season: str = "2025-2026", date: Optional[str] 
         return await api_get("games", params)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+@app.get("/api/h2h")
+async def get_h2h(home: str, away: str):
+    key = _matchup_key(home, away)
+    vals = _h2h_cache.get(key, [])
+    avg = round(sum(vals) / len(vals), 1) if vals else None
+    return {"avg": avg, "count": len(vals), "found": avg is not None}
+
+@app.get("/api/trigger-extract")
+async def trigger_extract():
+    await _extract_ft_games()
+    return {"status": "ok", "cached_matchups": len(_h2h_cache)}
 
 def _normalize_game(g: dict, league_id: int, league_name: str) -> dict:
     scores = g.get("scores", {})
@@ -640,3 +715,118 @@ def _demo_today():
          "q2_home": 22, "q2_away": 24, "total_home": 88, "total_away": 79,
          "q1_total": 47, "q2_live": 46, "ht_total": 93},
     ]
+
+
+# ---------- Google Sheets helpers ----------
+
+def _matchup_key(home: str, away: str) -> str:
+    return "|".join(sorted([home.lower().strip(), away.lower().strip()]))
+
+
+def _get_worksheet():
+    global _ws
+    if _ws is not None:
+        return _ws
+    if not (SHEETS_ID and CREDS_JSON):
+        return None
+    try:
+        import gspread
+        creds_data = json.loads(CREDS_JSON)
+        gc = gspread.service_account_from_dict(creds_data)
+        sh = gc.open_by_key(SHEETS_ID)
+        try:
+            _ws = sh.worksheet(SHEETS_TAB)
+        except gspread.WorksheetNotFound:
+            _ws = sh.add_worksheet(title=SHEETS_TAB, rows=1000, cols=10)
+            _ws.append_row(["date", "home", "away", "league",
+                            "q1_total", "q2_total", "ht_total", "ft_total"])
+        return _ws
+    except Exception as e:
+        logging.warning("Google Sheets init failed: %s", e)
+        return None
+
+
+def _load_h2h_from_sheet() -> None:
+    global _h2h_cache, _seen_ft_ids
+    ws = _get_worksheet()
+    if ws is None:
+        return
+    try:
+        rows = ws.get_all_records()
+        _h2h_cache = {}
+        _seen_ft_ids = set()
+        for row in rows:
+            home = str(row.get("home", "")).strip()
+            away = str(row.get("away", "")).strip()
+            # Use the halftime total (Q1+Q2 combined) for H2H comparison —
+            # the engine compares h2h against the halftime bookie line.
+            ht_total = row.get("ht_total")
+            game_key = f"{row.get('date', '')}-{home}-{away}"
+            _seen_ft_ids.add(game_key)
+            if home and away and ht_total:
+                key = _matchup_key(home, away)
+                _h2h_cache.setdefault(key, []).append(float(ht_total))
+        logging.info("Loaded %d matchups from Google Sheets", len(_h2h_cache))
+    except Exception as e:
+        logging.warning("Failed to load H2H from sheet: %s", e)
+
+
+async def _extract_ft_games() -> None:
+    """Fetch today's finished games, write new rows to Google Sheets, update cache."""
+    if not API_KEY:
+        return
+    from datetime import date as _date
+    today_str = _date.today().isoformat()
+    new_rows = []
+    for league_id, (name, season) in LEAGUES.items():
+        try:
+            data = await api_get("games", {"league": league_id, "season": season, "date": today_str})
+            for g in (data.get("response") or []):
+                if g.get("status", {}).get("short", "") != "FT":
+                    continue
+                ng = _normalize_game(g, league_id, name)
+                home, away = ng["home"], ng["away"]
+                ft_total = ng["total_home"] + ng["total_away"]
+                if ft_total == 0:
+                    continue  # skip games with incomplete score data
+                game_key = f"{today_str}-{home}-{away}"
+                if game_key in _seen_ft_ids:
+                    continue
+                _seen_ft_ids.add(game_key)
+                q2_total = ng["q2_home"] + ng["q2_away"]
+                # True halftime total = Q1 + Q2 (not the API's running total field)
+                ht_total_val = ng["q1_total"] + q2_total
+                new_rows.append([today_str, home, away, ng["league_name"],
+                                  ng["q1_total"], q2_total, ht_total_val, ft_total])
+                # Cache halftime total — engine compares h2h against the halftime line
+                _h2h_cache.setdefault(_matchup_key(home, away), []).append(float(ht_total_val))
+        except Exception as e:
+            logging.warning("FT extraction failed for league %s: %s", league_id, e)
+            continue
+
+    if not new_rows:
+        logging.info("No new FT games to extract")
+        return
+    logging.info("Extracted %d new FT games", len(new_rows))
+    ws = await asyncio.to_thread(_get_worksheet)
+    if ws:
+        try:
+            await asyncio.to_thread(ws.append_rows, new_rows, value_input_option="USER_ENTERED")
+            logging.info("Wrote %d rows to Google Sheets", len(new_rows))
+        except Exception as e:
+            logging.warning("Failed to write to Google Sheets: %s", e)
+            # Reset cached worksheet so the connection is re-established next run
+            global _ws
+            _ws = None
+
+
+async def _scheduler_loop() -> None:
+    """On startup: load H2H cache from sheet; then extract FT games every 30 min."""
+    await asyncio.to_thread(_load_h2h_from_sheet)
+    while True:
+        try:
+            await _extract_ft_games()
+        except Exception as e:
+            logging.warning("Scheduler error: %s", e)
+        await asyncio.sleep(1800)
+

@@ -7,3 +7,9 @@ services:
     envVars:
       - key: API_SPORTS_KEY
         sync: false
+      - key: GOOGLE_SHEETS_ID
+        sync: false
+      - key: GOOGLE_SHEETS_TAB
+        sync: false
+      - key: GOOGLE_CREDENTIALS_JSON
+        sync: false
