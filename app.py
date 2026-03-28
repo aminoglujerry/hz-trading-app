@@ -118,17 +118,24 @@ LEAGUES: dict[int, tuple[str, str]] = {
 _h2h_cache:        dict        = {}           # matchup_key → [ht_total, …]
 _ft_h2h_cache:     dict        = {}           # matchup_key → [ft_total, …]
 _seen_ft_ids:      OrderedDict = OrderedDict() # FIFO set, capped at SEEN_FT_IDS_MAX
-_game_stats_cache: dict        = {}           # game_id → (timestamp, result)
+_game_stats_cache: OrderedDict = OrderedDict() # game_id → (timestamp, result), FIFO-capped
 _ws                             = None         # gspread Worksheet (lazy init)
 _api_semaphore: Optional[asyncio.Semaphore]   = None  # init in lifespan
+_http_client:   Optional[httpx.AsyncClient]   = None  # persistent — reused across all API calls
+
+GAME_STATS_CACHE_MAX = 200   # max entries before oldest is evicted
 
 
 # ─── Lifespan ─────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app_: FastAPI):
-    global _api_semaphore
+    global _api_semaphore, _http_client
     _api_semaphore = asyncio.Semaphore(LIVE_API_CONCURRENCY)
+    _http_client   = httpx.AsyncClient(
+        timeout=API_TIMEOUT,
+        limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+    )
     task = asyncio.create_task(_scheduler_loop())
     log.info("🚀 App started — scheduler interval: %ds, concurrency: %d",
              SCHEDULER_INTERVAL, LIVE_API_CONCURRENCY)
@@ -138,6 +145,7 @@ async def lifespan(app_: FastAPI):
         await task
     except asyncio.CancelledError:
         pass
+    await _http_client.aclose()
     log.info("App shutdown complete")
 
 
@@ -530,15 +538,24 @@ function toggleManual(t){
   form.classList.toggle('open');
   btn.classList.toggle('open');
 }
+let _autoRefreshTimer=null;
+const AUTO_REFRESH_MS=60_000;
+
 function setLive(on,count){
   document.getElementById('liveDot').className='dot'+(on?' live':'');
   document.getElementById('liveLabel').textContent=on?'LIVE':'OFFLINE';
   if(count!=null)document.getElementById('liveCountNum').textContent=count;
+  // auto-refresh while live games are active, cancel when none
+  if(on&&!_autoRefreshTimer){
+    _autoRefreshTimer=setInterval(()=>loadLive(true),AUTO_REFRESH_MS);
+  }else if(!on&&_autoRefreshTimer){
+    clearInterval(_autoRefreshTimer);_autoRefreshTimer=null;
+  }
 }
 
-async function loadLive(){
+async function loadLive(silent=false){
   const btn=document.getElementById('refreshBtn');
-  btn.textContent='...';btn.disabled=true;
+  if(!silent){btn.textContent='...';btn.disabled=true;}
   try{
     const r=await fetch('/api/live');
     const d=await r.json();
@@ -550,10 +567,10 @@ async function loadLive(){
     document.getElementById('hzCount').textContent=(d.games||[]).length;
     document.getElementById('ftCount').textContent=(d.q3||[]).length;
   }catch(e){
-    document.getElementById('gamesWrap').innerHTML=`<div class="empty">⚠ ${e.message}</div>`;
+    if(!silent)document.getElementById('gamesWrap').innerHTML=`<div class="empty">⚠ ${e.message}</div>`;
     setLive(false,0);
   }
-  btn.textContent='⟳ LIVE';btn.disabled=false;
+  if(!silent){btn.textContent='⟳ LIVE';btn.disabled=false;}
 }
 
 // ── HZ Engine ──
@@ -700,7 +717,7 @@ function renderHzGames(games){
 function hzCard(g){
   const timer=g.timer||0;
   const label=g.status==='HT'?'HALBZEIT':`Q2 · ${timer}′`;
-  return`<div class="game-card" id="gc-${g.id}" onclick="selectHzCard(${g.id},${JSON.stringify(g.home)},${JSON.stringify(g.away)})">
+  return`<div class="game-card" id="gc-${g.id}" onclick="selectHzCard(${g.id},${JSON.stringify(g.home).replace(/"/g,'&quot;')},${JSON.stringify(g.away).replace(/"/g,'&quot;')})">
     <div class="card-stripe"></div>
     <div class="card-body">
       <div class="card-top"><span class="card-league">${g.league_name}</span><span class="card-status">${label}</span></div>
@@ -807,7 +824,7 @@ function renderFtCandidates(games){
 function ftCard(g){
   const q3tot=(g.q3_home||0)+(g.q3_away||0);
   const gap=Math.abs((g.q3_home||0)-(g.q3_away||0));
-  return`<div class="ft-card" id="ftc-${g.id}" onclick="selectFtCard(${g.id},${JSON.stringify(g.home)},${JSON.stringify(g.away)})">
+  return`<div class="ft-card" id="ftc-${g.id}" onclick="selectFtCard(${g.id},${JSON.stringify(g.home).replace(/"/g,'&quot;')},${JSON.stringify(g.away).replace(/"/g,'&quot;')})">
     <div class="card-stripe"></div>
     <div class="ft-body">
       <div class="card-top"><span class="card-league">${g.league_name}</span><span class="card-status">Q3 BREAK</span></div>
@@ -841,14 +858,33 @@ async function selectFtCard(id,home,away){
   document.querySelectorAll('.ft-card').forEach(c=>{c.classList.remove('selected');const ci=c.querySelector('.ft-card-inputs');if(ci)ci.classList.remove('open');});
   const card=document.getElementById('ftc-'+id);
   if(card){card.classList.add('selected');document.getElementById('ftci-'+id).classList.add('open');}
+  const [h2hRes,statsRes]=await Promise.allSettled([
+    fetch(`/api/h2h?home=${encodeURIComponent(home)}&away=${encodeURIComponent(away)}&type=ft`).then(r=>r.json()),
+    fetch(`/api/game-stats/${id}`).then(r=>r.json()),
+  ]);
   try{
-    const d=await fetch(`/api/h2h?home=${encodeURIComponent(home)}&away=${encodeURIComponent(away)}&type=ft`).then(r=>r.json());
-    const note=document.getElementById('fth2hn-'+id);
+    const d=h2hRes.value;const note=document.getElementById('fth2hn-'+id);
     if(d.found){
       note.textContent=`H2H FT Ø ${d.avg} (${d.count}x)`;note.className='h2h-note found';
       const inp=document.getElementById('ifth2h-'+id);
       if(inp&&!inp.value){inp.value=d.avg;document.getElementById('fth2hlbl-'+id).textContent=`H2H FT Ø (${d.count}x)`;}
     }else{note.textContent='H2H FT: kein Eintrag';note.className='h2h-note';}
+  }catch(e){}
+  try{
+    const s=statsRes.value;
+    if(s.found){
+      const fi=document.getElementById('iftfouls-'+id);
+      const fh=document.getElementById('iftfth-'+id);
+      const fa=document.getElementById('iftfta-'+id);
+      if(fi&&!fi.value&&s.total_fouls>0)fi.value=s.total_fouls;
+      if(fh&&!fh.value&&s.home_ft_pct!=null)fh.value=s.home_ft_pct;
+      if(fa&&!fa.value&&s.away_ft_pct!=null)fa.value=s.away_ft_pct;
+      const note=document.getElementById('fth2hn-'+id);
+      const extra=(s.total_fouls>0?` · Fouls:${s.total_fouls}`:'')+
+                  (s.home_ft_pct!=null?` · FT%H:${s.home_ft_pct}`:'')+
+                  (s.away_ft_pct!=null?` · FT%G:${s.away_ft_pct}`:'');
+      if(note&&extra)note.textContent+=extra;
+    }
   }catch(e){}
 }
 function calcFtCard(id,hz,q3h,q3a){
@@ -885,18 +921,19 @@ function renderFtToday(games){
 
 # ─── API Helper ───────────────────────────────────────────────────────────────
 
+_API_HEADERS = {
+    "x-apisports-key":  API_KEY,
+    "x-rapidapi-host":  "v1.basketball.api-sports.io",
+}
+
 async def api_get(endpoint: str, params: dict) -> dict:
-    """Rate-limited GET against API-Sports basketball endpoint."""
-    headers = {
-        "x-apisports-key": API_KEY,
-        "x-rapidapi-host": "v1.basketball.api-sports.io",
-    }
-    sem = _api_semaphore or asyncio.Semaphore(LIVE_API_CONCURRENCY)
+    """Rate-limited GET against API-Sports — reuses the persistent httpx client."""
+    client = _http_client or httpx.AsyncClient(timeout=API_TIMEOUT)
+    sem    = _api_semaphore or asyncio.Semaphore(LIVE_API_CONCURRENCY)
     async with sem:
-        async with httpx.AsyncClient(timeout=API_TIMEOUT) as client:
-            r = await client.get(f"{API_BASE}/{endpoint}", headers=headers, params=params)
-            r.raise_for_status()
-            return r.json()
+        r = await client.get(f"{API_BASE}/{endpoint}", headers=_API_HEADERS, params=params)
+        r.raise_for_status()
+        return r.json()
 
 
 def _normalize_game(g: dict, league_id: int, league_name: str) -> dict:
@@ -1124,6 +1161,13 @@ def _add_seen_ft_id(key: str) -> None:
     _seen_ft_ids[key] = True
     if len(_seen_ft_ids) > SEEN_FT_IDS_MAX:
         _seen_ft_ids.popitem(last=False)  # remove oldest entry
+
+
+def _set_stats_cache(game_id: int, value: tuple) -> None:
+    """Write to _game_stats_cache with FIFO eviction at GAME_STATS_CACHE_MAX."""
+    _game_stats_cache[game_id] = value
+    if len(_game_stats_cache) > GAME_STATS_CACHE_MAX:
+        _game_stats_cache.popitem(last=False)
 
 
 def _reset_worksheet() -> None:
@@ -1515,7 +1559,7 @@ async def get_game_stats(game_id: int):
         teams = data.get("response") or []
         if not teams:
             result = {"found": False}
-            _game_stats_cache[game_id] = (time(), result)
+            _set_stats_cache(game_id, (time(), result))
             return result
 
         parsed      = [_parse_team_stats(t) for t in teams]
