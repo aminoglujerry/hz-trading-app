@@ -640,9 +640,11 @@ async function loadLive(silent=false){
 }
 
 // ── HZ Engine ──
-function hzEngine({h2h,line,q1,q2,timer,fouls,ft,fg,lineDrop,lineRise}){
-  const timeLeft=Math.max(0,10-timer);
-  let q2proj=timer>0.5&&q2>0?q2+(q2/timer)*timeLeft:q1;
+// isHT=true: game is at halftime — Q2 is complete, skip entry-time checks, use actual q2
+function hzEngine({h2h,line,q1,q2,timer,fouls,ft,fg,lineDrop,lineRise,isHT=false}){
+  // At HT: Q2 is fully played, projection = actual q1+q2, no entry-time gate
+  const timeLeft=isHT?0:Math.max(0,10-timer);
+  let q2proj=isHT?q2:(timer>0.5&&q2>0?q2+(q2/timer)*timeLeft:q1);
   const proj=q1+q2proj;
   const buffer=proj-line;
   const h2hBuf=h2h!=null&&h2h>0?h2h-line:null;
@@ -650,7 +652,8 @@ function hzEngine({h2h,line,q1,q2,timer,fouls,ft,fg,lineDrop,lineRise}){
   const h2hOverCat=h2hBuf!==null&&h2hBuf<=-3;
   const overCat=foulsOC||ftOC||lineMC||h2hOverCat;
   const fgSkip=fg!==null&&fg>60;
-  const entryOk=timeLeft>=2.5,entryA=timeLeft>=3.5;
+  // At HT entry is always valid (it's the last moment to bet HZ line)
+  const entryOk=isHT||timeLeft>=2.5,entryA=isHT||timeLeft>=3.5;
   let dir='SKIP',stufe='C',reasons=[];
   if(buffer>=5&&entryOk&&fouls<8&&!fgSkip){
     dir='UNDER';
@@ -658,7 +661,9 @@ function hzEngine({h2h,line,q1,q2,timer,fouls,ft,fg,lineDrop,lineRise}){
       if(h2hBuf!==null&&h2hBuf<0){
         stufe='B';reasons=[`<span class="r-ok">✓ Buffer +${buffer.toFixed(1)} ≥ 5</span>`,`<span class="r-warn">~ H2H ${h2h} &lt; Linie → kontra</span>`];
       }else{
-        stufe='A';reasons=[`<span class="r-ok">✓ Buffer +${buffer.toFixed(1)} ≥ 5</span>`,`<span class="r-ok">✓ Entry ${timeLeft.toFixed(1)}′</span>`,`<span class="r-ok">✓ Fouls ${fouls} &lt; 8</span>`];
+        stufe='A';reasons=[`<span class="r-ok">✓ Buffer +${buffer.toFixed(1)} ≥ 5</span>`];
+        if(isHT)reasons.push(`<span class="r-ok">✓ Halbzeit — Ergebnis steht</span>`);
+        else reasons.push(`<span class="r-ok">✓ Entry ${timeLeft.toFixed(1)}′</span>`,`<span class="r-ok">✓ Fouls ${fouls} &lt; 8</span>`);
         if(h2hBuf!==null&&h2hBuf>=3)reasons.push(`<span class="r-ok">✓ H2H +${h2hBuf.toFixed(1)} bestätigt</span>`);
       }
     }else{stufe='B';reasons=[`<span class="r-warn">~ Buffer +${buffer.toFixed(1)}</span>`,`<span class="r-warn">~ Entry ${timeLeft.toFixed(1)}′ spät</span>`];}
@@ -671,10 +676,11 @@ function hzEngine({h2h,line,q1,q2,timer,fouls,ft,fg,lineDrop,lineRise}){
       if(lineMC)reasons.push(`<span class="r-ok">🔥 Linie bewegt</span>`);
       if(h2hOverCat)reasons.push(`<span class="r-ok">🔥 H2H ${h2hBuf.toFixed(1)} unter Linie</span>`);
     }else{stufe='B';reasons=[`<span class="r-warn">~ ${buffer.toFixed(1)} unter Linie</span>`,`<span class="r-warn">~ Kein Katalysator</span>`];}
-    reasons.push(`<span class="r-ok">✓ Entry ${timeLeft.toFixed(1)}′</span>`);
+    if(isHT)reasons.push(`<span class="r-ok">✓ Halbzeit — Ergebnis steht</span>`);
+    else reasons.push(`<span class="r-ok">✓ Entry ${timeLeft.toFixed(1)}′</span>`);
   }else{
     if(fgSkip)reasons.push(`<span class="r-bad">✗ FG% ${fg}% &gt; 60</span>`);
-    if(!entryOk)reasons.push(`<span class="r-bad">✗ Entry ${timeLeft.toFixed(1)}′ &lt; 2:30</span>`);
+    if(!isHT&&!entryOk)reasons.push(`<span class="r-bad">✗ Entry ${timeLeft.toFixed(1)}′ &lt; 2:30</span>`);
     if(Math.abs(buffer)<3)reasons.push(`<span class="r-bad">✗ Buffer ${buffer.toFixed(1)} &lt; 3</span>`);
     if(fouls>=8&&buffer>0)reasons.push(`<span class="r-warn">⚠ Fouls ≥8 → OVER prüfen</span>`);
     if(!reasons.length)reasons.push(`<span class="r-bad">✗ Kein Signal</span>`);
@@ -781,8 +787,9 @@ function renderHzGames(games){
   w.innerHTML=games.map(g=>hzCard(g)).join('');
 }
 function hzCard(g){
+  const isHT=g.status==='HT';
   const timer=g.timer||0;
-  const label=g.status==='HT'?'HALBZEIT':`Q2 · ${timer}′`;
+  const label=isHT?'HALBZEIT':`Q2 · ${timer}′`;
   return`<div class="game-card" id="gc-${g.id}" onclick="selectHzCard(${g.id},${JSON.stringify(g.home).replace(/"/g,'&quot;')},${JSON.stringify(g.away).replace(/"/g,'&quot;')})">
     <div class="card-stripe"></div>
     <div class="card-body">
@@ -809,7 +816,7 @@ function hzCard(g){
       <div class="inp-group"><label>Fouls</label><input type="number" id="ifouls-${g.id}" placeholder="5" min="0" inputmode="numeric"></div>
       <div class="inp-group"><label>FT% Ø</label><input type="number" id="ift-${g.id}" placeholder="—" inputmode="numeric"></div>
       <div class="inp-group"><label>FG%</label><input type="number" id="ifg-${g.id}" placeholder="—" inputmode="numeric"></div>
-      <button class="calc-mini" onclick="event.stopPropagation();calcHzCard(${g.id},${g.q1_total},${g.q2_live||0},${timer})">▶ SIGNAL</button>
+      <button class="calc-mini" onclick="event.stopPropagation();calcHzCard(${g.id},${g.q1_total},${g.q2_live||0},${timer},${isHT})">▶ SIGNAL</button>
     </div>
   </div>`;
 }
@@ -841,12 +848,12 @@ async function selectHzCard(id,home,away){
     }
   }catch(e){}
 }
-function calcHzCard(id,q1,q2live,timer){
+function calcHzCard(id,q1,q2live,timer,isHT=false){
   const line=parseFloat(document.getElementById('iline-'+id).value);
   if(!line){alert('Bookie Line eingeben!');return;}
   const sig=hzEngine({
     h2h:parseFloat(document.getElementById('ih2h-'+id).value)||null,
-    line,q1,q2:q2live,timer,
+    line,q1,q2:q2live,timer,isHT,
     fouls:parseFloat(document.getElementById('ifouls-'+id).value)||0,
     ft:parseFloat(document.getElementById('ift-'+id)?.value)||null,
     fg:parseFloat(document.getElementById('ifg-'+id)?.value)||null,
@@ -1108,9 +1115,11 @@ def _hz_engine(
     fg_pct:    Optional[float],
     line_drop: bool,
     line_rise: bool,
+    is_ht:     bool = False,
 ) -> dict:
-    time_left = max(0.0, 10.0 - timer)
-    q2_proj   = q2 + (q2 / timer) * time_left if timer > 0.5 and q2 > 0 else q1
+    # At HT: Q2 is fully played — use actual q2, bypass entry-time checks
+    time_left = 0.0 if is_ht else max(0.0, 10.0 - timer)
+    q2_proj   = q2 if is_ht else (q2 + (q2 / timer) * time_left if timer > 0.5 and q2 > 0 else q1)
     proj      = q1 + q2_proj
     buffer    = proj - line
     h2h_buf   = (h2h - line) if (h2h is not None and h2h > 0) else None
@@ -1120,8 +1129,8 @@ def _hz_engine(
     line_mc      = line_drop or line_rise
     h2h_over_cat = h2h_buf is not None and h2h_buf <= HZ_H2H_OVER_BUFFER
     fg_skip      = fg_pct is not None and fg_pct > HZ_FG_SKIP
-    entry_ok     = time_left >= HZ_ENTRY_MIN
-    entry_a      = time_left >= HZ_ENTRY_OPTIMAL
+    entry_ok     = is_ht or time_left >= HZ_ENTRY_MIN
+    entry_a      = is_ht or time_left >= HZ_ENTRY_OPTIMAL
 
     dir_    = "SKIP"
     stufe   = "C"
@@ -1138,19 +1147,16 @@ def _hz_engine(
                 ]
             else:
                 stufe = "A"
-                reasons = [
-                    f"Buffer +{buffer:.1f} >= {HZ_BUFFER_UNDER}",
-                    f"Entry {time_left:.1f}min",
-                    f"Fouls {fouls} < {HZ_FOULS_THRESHOLD}",
-                ]
+                reasons = [f"Buffer +{buffer:.1f} >= {HZ_BUFFER_UNDER}"]
+                if is_ht:
+                    reasons.append("Halbzeit — Ergebnis steht")
+                else:
+                    reasons += [f"Entry {time_left:.1f}min", f"Fouls {fouls} < {HZ_FOULS_THRESHOLD}"]
                 if h2h_buf is not None and h2h_buf >= HZ_H2H_CONFIRM_BUFFER:
                     reasons.append(f"H2H +{h2h_buf:.1f} bestaetigt")
         else:
             stufe = "B"
-            reasons = [
-                f"Buffer +{buffer:.1f}",
-                f"Entry {time_left:.1f}min spaet",
-            ]
+            reasons = [f"Buffer +{buffer:.1f}", f"Entry {time_left:.1f}min spaet"]
 
     elif buffer <= -HZ_BUFFER_OVER and entry_ok:
         dir_ = "OVER"
@@ -1166,16 +1172,16 @@ def _hz_engine(
                 reasons.append(f"H2H {h2h_buf:.1f} unter Linie")
         else:
             stufe = "B"
-            reasons = [
-                f"Buffer {buffer:.1f} unter Linie",
-                "Kein Katalysator",
-            ]
-        reasons.append(f"Entry {time_left:.1f}min")
+            reasons = [f"Buffer {buffer:.1f} unter Linie", "Kein Katalysator"]
+        if is_ht:
+            reasons.append("Halbzeit — Ergebnis steht")
+        else:
+            reasons.append(f"Entry {time_left:.1f}min")
 
     else:
         if fg_skip:
             reasons.append(f"FG% {fg_pct}% > {HZ_FG_SKIP} -> Skip")
-        if not entry_ok:
+        if not is_ht and not entry_ok:
             reasons.append(f"Entry {time_left:.1f}min < {HZ_ENTRY_MIN}")
         if abs(buffer) < HZ_BUFFER_OVER:
             reasons.append(f"Buffer {buffer:.1f} < {HZ_BUFFER_OVER}")
@@ -1488,7 +1494,11 @@ async def _fetch_live_for_league(
             ng     = _normalize_game(g, league_id, name)
             if status in ("HT", "Q2"):
                 hz.append(ng)
-            elif status == "Q3BT":
+            elif status == "Q3BT" or (
+                # Some leagues return generic "BT" for all quarter breaks;
+                # distinguish Q3 break from Q1 break by checking if Q3 has scores
+                status == "BT" and (ng.get("q3_home", 0) > 0 or ng.get("q3_away", 0) > 0)
+            ):
                 q3.append(ng)
             else:
                 others.append(ng)
@@ -1722,16 +1732,18 @@ async def signal_hz(
     fg_pct:    Optional[float] = Query(None, description="Average FG% both teams"),
     line_drop: bool            = Query(False, description="Line dropped >=8 points"),
     line_rise: bool            = Query(False, description="Line is rising"),
+    is_ht:     bool            = Query(False, description="Game is at halftime (Q2 complete)"),
 ):
     """
     HZ Signal Engine as a JSON API.
     Example: /api/signal/hz?line=91.5&q1=52&q2=28&timer=4&fouls=5
+    At halftime: add &is_ht=true — uses actual q2 total, bypasses entry-time gate.
     Returns: dir (UNDER/OVER/SKIP), stufe (A/B/C), proj, buffer, time_left, reasons[]
     """
     return _hz_engine(
         h2h=h2h, line=line, q1=q1, q2=q2, timer=timer,
         fouls=fouls, ft_pct=ft_pct, fg_pct=fg_pct,
-        line_drop=line_drop, line_rise=line_rise,
+        line_drop=line_drop, line_rise=line_rise, is_ht=is_ht,
     )
 
 
