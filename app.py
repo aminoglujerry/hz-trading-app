@@ -157,218 +157,319 @@ HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Trading · HZ / FT</title>
+<title>HZ / FT Trading</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#07080b;--s1:#0d0e13;--s2:#111218;
-  --border:#1a1b24;--border2:#22232f;
+  --bg:#07080b;--s1:#0d0e13;--s2:#111218;--s3:#13141a;
+  --border:#1a1b24;--border2:#252630;
   --text:#c9cdd8;--dim:#3e4055;--dim2:#555770;
   --under:#00b4d8;--over:#e63946;--green:#2dc653;--gold:#f4a261;--white:#f0f1f5;
+  --panel-w:340px;--topbar-h:48px;
 }
 *{margin:0;padding:0;box-sizing:border-box;}
-body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;min-height:100vh;}
+html,body{height:100%;overflow:hidden;}
+body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;}
 
-.topbar{position:sticky;top:0;z-index:200;background:var(--s1);border-bottom:1px solid var(--border);
-  display:flex;align-items:center;justify-content:space-between;padding:0 16px;height:48px;}
-.logo{font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:18px;letter-spacing:4px;color:var(--white);}
+/* ── Topbar ── */
+.topbar{
+  position:fixed;top:0;left:0;right:0;z-index:300;
+  height:var(--topbar-h);background:var(--s1);
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;padding:0 16px;gap:12px;
+}
+.logo{font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:20px;
+  letter-spacing:5px;color:var(--white);flex-shrink:0;}
 .logo em{color:var(--green);font-style:normal;}
-.topbar-right{display:flex;align-items:center;gap:10px;}
-.live-pill{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--dim2);letter-spacing:1px;}
+.topbar-divider{width:1px;height:20px;background:var(--border2);flex-shrink:0;}
+.live-count{font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;
+  letter-spacing:2px;color:var(--dim2);flex-shrink:0;}
+.live-count span{color:var(--white);}
+.topbar-spacer{flex:1;}
+.live-pill{display:flex;align-items:center;gap:6px;font-size:10px;
+  color:var(--dim2);letter-spacing:1.5px;flex-shrink:0;}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--dim);}
-.dot.live{background:var(--green);box-shadow:0 0 6px var(--green);animation:pulse 1.5s infinite;}
+.dot.live{background:var(--green);box-shadow:0 0 8px var(--green);animation:pulse 1.5s infinite;}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
-.icon-btn{background:none;border:1px solid var(--border2);color:var(--dim2);padding:5px 12px;
-  font-size:11px;letter-spacing:1px;cursor:pointer;font-family:'Barlow',sans-serif;
-  text-transform:uppercase;transition:all .15s;}
-.icon-btn:hover{border-color:var(--green);color:var(--green);}
+.icon-btn{background:none;border:1px solid var(--border2);color:var(--dim2);
+  padding:5px 14px;font-size:11px;letter-spacing:1.5px;cursor:pointer;
+  font-family:'Barlow',sans-serif;text-transform:uppercase;transition:all .15s;flex-shrink:0;}
+.icon-btn:hover,.icon-btn:disabled{border-color:var(--green);color:var(--green);}
+.icon-btn:disabled{opacity:.5;cursor:default;}
 
-/* signal strip */
-.signal-strip{background:var(--s1);border-bottom:2px solid var(--border);padding:12px 16px;
-  display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:center;transition:border-bottom-color .3s;}
-.signal-strip.under{border-bottom-color:rgba(0,180,216,.5);}
-.signal-strip.over {border-bottom-color:rgba(230,57,70,.5);}
-.signal-strip.glow {box-shadow:0 4px 20px rgba(45,198,83,.1);}
-.sig-dir-big{font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:52px;
-  letter-spacing:3px;line-height:1;color:var(--dim);min-width:120px;text-align:center;}
-.sig-dir-big.under{color:var(--under);}
-.sig-dir-big.over {color:var(--over);}
-.sig-body{display:flex;flex-direction:column;gap:8px;}
-.sig-top{display:flex;align-items:center;gap:10px;}
+/* ── App shell ── */
+.app-shell{
+  display:grid;
+  grid-template-columns:1fr var(--panel-w);
+  height:100vh;
+  padding-top:var(--topbar-h);
+}
+
+/* ── Games column (left) ── */
+.games-col{
+  overflow-y:auto;padding:14px 14px 24px;
+  scrollbar-width:thin;scrollbar-color:var(--border2) transparent;
+}
+.games-col::-webkit-scrollbar{width:4px;}
+.games-col::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
+
+.sec{font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--dim);
+  margin:16px 0 8px;display:flex;align-items:center;gap:8px;}
+.sec:first-child{margin-top:4px;}
+.sec::after{content:'';flex:1;height:1px;background:var(--border);}
+.sec-badge{background:var(--s2);border:1px solid var(--border2);color:var(--dim2);
+  font-size:9px;padding:1px 6px;letter-spacing:1px;}
+
+.games-wrap{display:flex;flex-direction:column;gap:2px;}
+.empty{text-align:center;padding:28px 14px;color:var(--dim);
+  border:1px dashed var(--border);font-size:11px;line-height:2.2;}
+
+/* ── Game cards ── */
+.game-card,.ft-card{
+  background:var(--s2);border:1px solid var(--border);cursor:pointer;
+  display:grid;grid-template-columns:3px 1fr;transition:border-color .12s,box-shadow .12s;
+}
+.game-card:hover,.ft-card:hover{border-color:var(--border2);}
+.game-card.selected,.ft-card.selected{border-color:var(--dim2);}
+.sig-under{border-color:rgba(0,180,216,.45)!important;}
+.sig-over {border-color:rgba(230,57,70,.45)!important;}
+.sig-a    {box-shadow:0 0 14px rgba(45,198,83,.12);}
+
+.card-stripe{width:3px;transition:background .2s;}
+.sig-under .card-stripe{background:var(--under);}
+.sig-over  .card-stripe{background:var(--over);}
+.sig-a     .card-stripe{background:var(--green);}
+.card-body,.ft-body{padding:9px 11px;}
+
+.card-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;}
+.card-league{font-size:9px;letter-spacing:1.5px;color:var(--dim2);text-transform:uppercase;}
+.card-status{font-size:9px;color:var(--gold);font-family:'Barlow Condensed',sans-serif;font-weight:700;letter-spacing:1px;}
+
+.card-teams{display:grid;grid-template-columns:1fr auto 1fr;gap:4px;align-items:center;margin-bottom:7px;}
+.card-team{font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:700;color:var(--white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.card-team.away{text-align:right;}
+.score-block{text-align:center;}
+.score-num{font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:900;color:var(--white);line-height:1;}
+.score-q1{font-size:9px;color:var(--dim2);margin-top:1px;}
+
+.card-stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap:2px;margin-bottom:6px;}
+.cs{background:var(--bg);padding:4px;text-align:center;}
+.cs-val{font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:700;color:var(--text);}
+.cs-lbl{font-size:7px;letter-spacing:1px;text-transform:uppercase;color:var(--dim);margin-top:1px;}
+
+.card-bot{display:flex;justify-content:space-between;align-items:center;
+  padding-top:6px;border-top:1px solid var(--border);}
+.h2h-note{font-size:9px;color:var(--dim2);letter-spacing:.5px;}
+.h2h-note.found{color:var(--green);}
+.card-sig-badge{font-size:9px;font-weight:700;letter-spacing:1.5px;padding:2px 7px;border:1px solid;}
+.card-sig-badge.under{color:var(--under);border-color:rgba(0,180,216,.3);}
+.card-sig-badge.over {color:var(--over); border-color:rgba(230,57,70,.3);}
+.card-sig-badge.skip,.card-sig-badge.none{color:var(--dim);border-color:var(--border);}
+.card-stufe-badge{font-size:9px;font-weight:700;padding:2px 7px;font-family:'Barlow Condensed',sans-serif;}
+.card-stufe-badge.a{background:var(--green);color:var(--bg);}
+.card-stufe-badge.b{background:var(--gold);color:var(--bg);}
+.card-stufe-badge.c{color:var(--dim);}
+
+/* card input drawer */
+.card-inputs,.ft-card-inputs{
+  display:none;padding:9px 11px;border-top:1px solid var(--border);background:var(--s3);
+}
+.card-inputs.open,.ft-card-inputs.open{
+  display:grid;grid-template-columns:repeat(3,1fr);gap:5px;
+}
+.inp-group{display:flex;flex-direction:column;gap:3px;}
+.inp-group label{font-size:8px;letter-spacing:1px;color:var(--dim2);text-transform:uppercase;}
+.inp-group input{
+  background:var(--bg);border:1px solid var(--border2);color:var(--white);
+  font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:600;
+  padding:5px 7px;outline:none;width:100%;
+}
+.inp-group input:focus{border-color:var(--under);}
+.calc-mini{
+  grid-column:1/-1;background:var(--white);border:none;
+  font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:900;
+  letter-spacing:3px;padding:8px;cursor:pointer;text-transform:uppercase;color:var(--bg);
+}
+.calc-mini:hover{background:#dde1f0;}
+
+/* ── Right panel ── */
+.right-panel{
+  border-left:1px solid var(--border);
+  display:flex;flex-direction:column;
+  height:100%;overflow:hidden;
+}
+
+/* Signal card — always visible at top of right panel */
+.signal-card{
+  flex-shrink:0;
+  padding:14px 16px 12px;
+  border-bottom:2px solid var(--border);
+  background:var(--s1);
+  transition:border-bottom-color .25s,background .25s;
+}
+.signal-card.under{border-bottom-color:rgba(0,180,216,.6);background:#09131a;}
+.signal-card.over {border-bottom-color:rgba(230,57,70,.6);background:#140d0e;}
+.signal-card.glow {box-shadow:inset 0 -1px 0 rgba(45,198,83,.15);}
+
+.sig-header{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+.sig-tag{font-size:9px;letter-spacing:2px;color:var(--dim2);text-transform:uppercase;
+  padding:2px 8px;background:var(--s2);border:1px solid var(--border2);}
 .sig-stufe{font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;
   letter-spacing:3px;padding:2px 10px;border:1px solid;}
 .st-a{color:var(--green);border-color:rgba(45,198,83,.4);}
 .st-b{color:var(--gold); border-color:rgba(244,162,97,.4);}
 .st-c{color:var(--dim);  border-color:var(--border);}
-.sig-tag{font-size:9px;letter-spacing:2px;color:var(--dim2);text-transform:uppercase;
-  padding:2px 8px;background:var(--s2);border:1px solid var(--border);}
-.sig-reasons{font-size:10px;line-height:1.9;color:var(--dim2);}
-.r-ok{color:var(--green);}
-.r-warn{color:var(--gold);}
-.r-bad{color:var(--over);}
-.sig-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:2px;}
-.ss{background:var(--s2);border:1px solid var(--border);padding:8px 6px;text-align:center;}
-.ss-v{font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;color:var(--white);}
+
+.sig-dir{
+  font-family:'Barlow Condensed',sans-serif;font-weight:900;
+  font-size:48px;letter-spacing:4px;line-height:1;
+  color:var(--dim);margin-bottom:10px;
+}
+.sig-dir.under{color:var(--under);}
+.sig-dir.over {color:var(--over);}
+
+.sig-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:2px;margin-bottom:10px;}
+.ss{background:var(--s2);border:1px solid var(--border);padding:7px 4px;text-align:center;}
+.ss-v{font-family:'Barlow Condensed',sans-serif;font-size:17px;font-weight:700;color:var(--white);}
 .ss-v.pos{color:var(--under);}
 .ss-v.neg{color:var(--over);}
 .ss-v.gold{color:var(--gold);}
 .ss-l{font-size:8px;letter-spacing:1px;text-transform:uppercase;color:var(--dim);margin-top:1px;}
 
-/* tabs */
-.tabs{display:flex;border-bottom:1px solid var(--border);background:var(--s1);}
-.tab{padding:12px 24px;font-size:11px;letter-spacing:3px;text-transform:uppercase;
-  cursor:pointer;color:var(--dim2);border-bottom:2px solid transparent;transition:all .15s;user-select:none;}
-.tab:hover{color:var(--text);}
-.tab.active{color:var(--white);border-bottom-color:var(--green);}
-.tab-content{display:none;}
-.tab-content.active{display:block;}
+.sig-reasons{font-size:10px;line-height:1.9;color:var(--dim2);}
+.r-ok{color:var(--green);}
+.r-warn{color:var(--gold);}
+.r-bad{color:var(--over);}
 
-.main-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;}
-.panel{padding:14px;border-right:1px solid var(--border);}
-.panel:last-child{border-right:none;}
-.sec{font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--dim);
-  margin-bottom:10px;display:flex;align-items:center;gap:8px;}
-.sec::after{content:'';flex:1;height:1px;background:var(--border);}
-
-/* manual form */
-.manual-toggle{background:none;border:1px dashed var(--border2);color:var(--dim2);width:100%;
-  padding:10px;font-size:10px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;
-  font-family:'Barlow',sans-serif;margin-bottom:8px;transition:all .15s;}
-.manual-toggle:hover{border-color:var(--dim);color:var(--text);}
-.manual-form{display:none;background:var(--s2);border:1px solid var(--border);padding:14px;margin-bottom:8px;}
+/* Manual section */
+.manual-section{flex-shrink:0;border-bottom:1px solid var(--border);}
+.manual-toggle{
+  display:flex;align-items:center;justify-content:space-between;
+  width:100%;padding:10px 16px;background:none;border:none;
+  color:var(--dim2);font-size:10px;letter-spacing:2px;text-transform:uppercase;
+  cursor:pointer;font-family:'Barlow',sans-serif;transition:color .15s;
+  border-bottom:1px solid var(--border);
+}
+.manual-toggle:last-of-type{border-bottom:none;}
+.manual-toggle:hover{color:var(--text);}
+.manual-toggle .arrow{font-size:9px;transition:transform .15s;}
+.manual-toggle.open .arrow{transform:rotate(90deg);}
+.manual-form{display:none;padding:10px 16px 12px;background:var(--s3);}
 .manual-form.open{display:block;}
-.mf-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;}
+.mf-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:7px;}
 .mf-inp{display:flex;flex-direction:column;gap:3px;}
-.mf-inp label{font-size:9px;letter-spacing:1px;color:var(--dim2);text-transform:uppercase;}
-.mf-inp input{background:var(--bg);border:1px solid var(--border2);color:var(--white);
-  font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;padding:6px 8px;outline:none;}
+.mf-inp label{font-size:8px;letter-spacing:1px;color:var(--dim2);text-transform:uppercase;}
+.mf-inp input{
+  background:var(--bg);border:1px solid var(--border2);color:var(--white);
+  font-family:'Barlow Condensed',sans-serif;font-size:17px;font-weight:700;
+  padding:5px 7px;outline:none;
+}
 .mf-inp input:focus{border-color:var(--green);}
-.checks-row{display:flex;gap:14px;margin-bottom:8px;flex-wrap:wrap;}
+.checks-row{display:flex;gap:12px;margin-bottom:7px;flex-wrap:wrap;}
 .chk{display:flex;align-items:center;gap:5px;cursor:pointer;user-select:none;}
-.chk-box{width:14px;height:14px;border:1px solid var(--border2);background:var(--bg);
-  display:flex;align-items:center;justify-content:font-size:9px;}
+.chk-box{width:13px;height:13px;border:1px solid var(--border2);background:var(--bg);
+  display:flex;align-items:center;justify-content:center;font-size:8px;}
 .chk.on .chk-box{background:var(--over);border-color:var(--over);color:#fff;}
 .chk-lbl{font-size:10px;color:var(--dim2);}
 .chk.on .chk-lbl{color:var(--text);}
-.btn-calc{width:100%;background:var(--white);border:none;color:var(--bg);
-  font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:900;
-  letter-spacing:4px;padding:12px;cursor:pointer;text-transform:uppercase;}
+.btn-calc{
+  width:100%;background:var(--white);border:none;color:var(--bg);
+  font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:900;
+  letter-spacing:4px;padding:10px;cursor:pointer;text-transform:uppercase;
+}
 .btn-calc:hover{background:#dde1f0;}
 
-/* game cards */
-.games-wrap{display:flex;flex-direction:column;gap:2px;}
-.game-card{background:var(--s2);border:1px solid var(--border);cursor:pointer;
-  display:grid;grid-template-columns:3px 1fr;transition:border-color .15s;}
-.game-card:hover{border-color:var(--border2);}
-.game-card.selected{border-color:var(--dim2);}
-.game-card.sig-under{border-color:rgba(0,180,216,.4);}
-.game-card.sig-over {border-color:rgba(230,57,70,.4);}
-.game-card.sig-a    {box-shadow:0 0 12px rgba(45,198,83,.1);}
-.ft-card{background:var(--s2);border:1px solid var(--border);cursor:pointer;
-  display:grid;grid-template-columns:3px 1fr;margin-bottom:2px;transition:border-color .15s;}
-.ft-card:hover{border-color:var(--border2);}
-.ft-card.selected{border-color:var(--dim2);}
-.ft-card.sig-under{border-color:rgba(0,180,216,.4);}
-.ft-card.sig-over {border-color:rgba(230,57,70,.4);}
-.ft-card.sig-a    {box-shadow:0 0 12px rgba(45,198,83,.1);}
-.card-stripe{width:3px;}
-.sig-under .card-stripe{background:var(--under);}
-.sig-over  .card-stripe{background:var(--over);}
-.sig-a     .card-stripe{background:var(--green);}
-.card-body,.ft-body{padding:10px 12px;}
-.card-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;}
-.card-league{font-size:9px;letter-spacing:1.5px;color:var(--dim2);text-transform:uppercase;}
-.card-status{font-size:9px;color:var(--gold);}
-.card-teams{display:grid;grid-template-columns:1fr auto 1fr;gap:4px;align-items:center;margin-bottom:8px;}
-.card-team{font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;color:var(--white);}
-.card-team.away{text-align:right;}
-.score-num{font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:900;color:var(--white);text-align:center;}
-.score-q1{font-size:9px;color:var(--dim2);margin-top:1px;text-align:center;}
-.card-stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap:2px;margin-bottom:6px;}
-.cs{background:var(--bg);padding:5px 4px;text-align:center;}
-.cs-val{font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:700;color:var(--text);}
-.cs-lbl{font-size:7px;letter-spacing:1px;text-transform:uppercase;color:var(--dim);margin-top:1px;}
-.card-bot{display:flex;justify-content:space-between;align-items:center;padding-top:6px;border-top:1px solid var(--border);}
-.card-sig-badge{font-size:9px;font-weight:700;letter-spacing:1.5px;padding:2px 7px;border:1px solid;}
-.card-sig-badge.under{color:var(--under);border-color:rgba(0,180,216,.3);}
-.card-sig-badge.over {color:var(--over); border-color:rgba(230,57,70,.3);}
-.card-sig-badge.skip,.card-sig-badge.none{color:var(--dim);border-color:var(--border);}
-.card-stufe-badge{font-size:9px;font-weight:700;padding:2px 7px;}
-.card-stufe-badge.a{background:var(--green);color:var(--bg);}
-.card-stufe-badge.b{background:var(--gold);color:var(--bg);}
-.card-stufe-badge.c{color:var(--dim);}
-.card-inputs,.ft-card-inputs{display:none;padding:10px 12px;border-top:1px solid var(--border);background:var(--s1);}
-.card-inputs.open,.ft-card-inputs.open{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;}
-.inp-group{display:flex;flex-direction:column;gap:3px;}
-.inp-group label{font-size:8px;letter-spacing:1px;color:var(--dim2);text-transform:uppercase;}
-.inp-group input{background:var(--bg);border:1px solid var(--border2);color:var(--white);
-  font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:600;
-  padding:5px 7px;outline:none;width:100%;}
-.inp-group input:focus{border-color:var(--under);}
-.calc-mini{grid-column:1/-1;background:var(--white);border:none;
-  font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:900;
-  letter-spacing:3px;padding:8px;cursor:pointer;text-transform:uppercase;color:var(--bg);}
-.calc-mini:hover{background:#dde1f0;}
-.h2h-note{font-size:9px;color:var(--dim2);letter-spacing:.5px;}
-.h2h-note.found{color:var(--green);}
-.today-card{background:var(--s2);border:1px solid var(--border);display:grid;
-  grid-template-columns:3px 1fr;margin-bottom:2px;}
-.today-body{padding:8px 12px;}
-.today-top{display:flex;justify-content:space-between;margin-bottom:4px;}
+/* Today section — scrolls independently */
+.today-section{
+  flex:1;min-height:0;overflow-y:auto;
+  scrollbar-width:thin;scrollbar-color:var(--border2) transparent;
+}
+.today-section::-webkit-scrollbar{width:4px;}
+.today-section::-webkit-scrollbar-thumb{background:var(--border2);}
+.today-inner{padding:0 14px 24px;}
+
+.today-card{
+  background:var(--s2);border:1px solid var(--border);
+  display:grid;grid-template-columns:3px 1fr;margin-top:2px;
+}
+.today-body{padding:7px 10px;}
+.today-top{display:flex;justify-content:space-between;margin-bottom:3px;}
 .today-league{font-size:9px;letter-spacing:1px;color:var(--dim2);text-transform:uppercase;}
 .today-status{font-size:9px;}
 .today-teams{display:grid;grid-template-columns:1fr auto 1fr;gap:4px;align-items:center;}
-.today-team{font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;color:var(--white);}
+.today-team{font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;
+  color:var(--white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .today-team.away{text-align:right;}
-.today-score{text-align:center;font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:900;color:var(--white);}
+.today-score{text-align:center;font-family:'Barlow Condensed',sans-serif;
+  font-size:17px;font-weight:900;color:var(--white);}
 .today-q{font-size:8px;color:var(--dim2);margin-top:1px;text-align:center;}
-.empty{text-align:center;padding:32px 14px;color:var(--dim);border:1px dashed var(--border);font-size:11px;line-height:2.2;}
 
-@media(max-width:700px){
-  .main-grid{grid-template-columns:1fr;}
-  .panel{border-right:none;border-bottom:1px solid var(--border);}
-  .signal-strip{grid-template-columns:1fr;}
-  .sig-dir-big{font-size:36px;min-width:unset;}
+/* Mobile */
+@media(max-width:800px){
+  html,body{overflow:auto;}
+  .app-shell{grid-template-columns:1fr;height:auto;}
+  .right-panel{height:auto;border-left:none;border-top:1px solid var(--border);}
+  .today-section{max-height:60vh;}
+  .signal-card{position:sticky;top:var(--topbar-h);z-index:100;}
+  .sig-dir{font-size:36px;}
 }
 </style>
 </head>
 <body>
 
+<!-- Topbar -->
 <div class="topbar">
   <div class="logo">HZ / <em>FT</em></div>
-  <div class="topbar-right">
-    <div class="live-pill"><div class="dot" id="liveDot"></div><span id="liveLabel">OFFLINE</span></div>
-    <button class="icon-btn" id="refreshBtn" onclick="loadLive()">⟳ LIVE</button>
+  <div class="topbar-divider"></div>
+  <div class="live-count"><span id="liveCountNum">0</span> LIVE</div>
+  <div class="topbar-spacer"></div>
+  <div class="live-pill">
+    <div class="dot" id="liveDot"></div>
+    <span id="liveLabel">OFFLINE</span>
   </div>
+  <button class="icon-btn" id="refreshBtn" onclick="loadLive()">⟳ LIVE</button>
 </div>
 
-<div class="signal-strip" id="signalStrip">
-  <div class="sig-dir-big" id="sigDir">—</div>
-  <div class="sig-body">
-    <div class="sig-top">
-      <span class="sig-stufe st-c" id="sigStufe">— —</span>
-      <span class="sig-tag" id="sigTag">HZ</span>
+<!-- App Shell: Games (left) + Signal Panel (right) -->
+<div class="app-shell">
+
+  <!-- Left: scrollable games -->
+  <div class="games-col">
+    <div class="sec">HZ · Halbzeit / Q2 <span class="sec-badge" id="hzCount">0</span></div>
+    <div class="games-wrap" id="gamesWrap">
+      <div class="empty">⟳ Klicke LIVE um Halbzeit-Spiele zu laden</div>
     </div>
-    <div class="sig-stats">
-      <div class="ss"><div class="ss-v" id="ssProj">—</div><div class="ss-l">Proj</div></div>
-      <div class="ss"><div class="ss-v" id="ssBuf">—</div><div class="ss-l">Buffer</div></div>
-      <div class="ss"><div class="ss-v" id="ssTime">—</div><div class="ss-l">Zeit</div></div>
-      <div class="ss"><div class="ss-v" id="ssFouls">—</div><div class="ss-l">Fouls</div></div>
+
+    <div class="sec">FT · Q3 Break <span class="sec-badge" id="ftCount">0</span></div>
+    <div class="games-wrap" id="ftGamesWrap">
+      <div class="empty">⟳ Klicke LIVE — zeigt Spiele am Q3 Break</div>
     </div>
-    <div class="sig-reasons" id="sigReasons">Spiel wählen oder manuell eingeben</div>
   </div>
-</div>
 
-<div class="tabs">
-  <div class="tab active" onclick="switchTab('hz')">HZ</div>
-  <div class="tab" onclick="switchTab('ft')">FT</div>
-</div>
+  <!-- Right: sticky signal panel -->
+  <div class="right-panel">
 
-<!-- HZ TAB -->
-<div class="tab-content active" id="tab-hz">
-  <div class="main-grid">
-    <div class="panel">
-      <button class="manual-toggle" onclick="toggleManual('hz')">+ Manuell (HZ)</button>
+    <!-- Signal card — always visible -->
+    <div class="signal-card" id="signalStrip">
+      <div class="sig-header">
+        <span class="sig-tag" id="sigTag">HZ</span>
+        <span class="sig-stufe st-c" id="sigStufe">— —</span>
+      </div>
+      <div class="sig-dir" id="sigDir">—</div>
+      <div class="sig-stats">
+        <div class="ss"><div class="ss-v" id="ssProj">—</div><div class="ss-l">Proj</div></div>
+        <div class="ss"><div class="ss-v" id="ssBuf">—</div><div class="ss-l">Buffer</div></div>
+        <div class="ss"><div class="ss-v" id="ssTime">—</div><div class="ss-l">Zeit</div></div>
+        <div class="ss"><div class="ss-v" id="ssFouls">—</div><div class="ss-l">Fouls</div></div>
+      </div>
+      <div class="sig-reasons" id="sigReasons">Spiel wählen oder manuell eingeben</div>
+    </div>
+
+    <!-- Manual input — collapsible -->
+    <div class="manual-section">
+      <button class="manual-toggle" id="mToggleHz" onclick="toggleManual('hz')">
+        + Manuell HZ <span class="arrow">›</span>
+      </button>
       <div class="manual-form" id="manualHz">
         <div class="mf-grid">
           <div class="mf-inp"><label>H2H Ø HZ</label><input type="number" id="hH2H" placeholder="96.5" step="0.5" inputmode="decimal"></div>
@@ -377,32 +478,19 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;min-
           <div class="mf-inp"><label>Q2 aktuell</label><input type="number" id="hQ2" placeholder="28" inputmode="numeric"></div>
           <div class="mf-inp"><label>Q2 Zeit (Min)</label><input type="number" id="hTimer" placeholder="4" min="0" max="10" step="0.5" inputmode="decimal"></div>
           <div class="mf-inp"><label>Fouls gesamt</label><input type="number" id="hFouls" placeholder="5" inputmode="numeric"></div>
-          <div class="mf-inp"><label>FT% Ø (opt.)</label><input type="number" id="hFT" placeholder="—" inputmode="numeric"></div>
-          <div class="mf-inp"><label>FG% (opt.)</label><input type="number" id="hFG" placeholder="—" inputmode="numeric"></div>
+          <div class="mf-inp"><label>FT% Ø</label><input type="number" id="hFT" placeholder="—" inputmode="numeric"></div>
+          <div class="mf-inp"><label>FG%</label><input type="number" id="hFG" placeholder="—" inputmode="numeric"></div>
         </div>
         <div class="checks-row">
-          <div class="chk" id="chkDrop" onclick="this.classList.toggle('on')"><div class="chk-box">✓</div><span class="chk-lbl">Linie fällt drastisch (≥8)</span></div>
+          <div class="chk" id="chkDrop" onclick="this.classList.toggle('on')"><div class="chk-box">✓</div><span class="chk-lbl">Linie fällt ≥8</span></div>
           <div class="chk" id="chkRise" onclick="this.classList.toggle('on')"><div class="chk-box">✓</div><span class="chk-lbl">Linie steigt</span></div>
         </div>
         <button class="btn-calc" onclick="calcManualHz()">▶ HZ SIGNAL</button>
       </div>
-      <div class="sec">Live · Halbzeit / Q2</div>
-      <div class="games-wrap" id="gamesWrap">
-        <div class="empty">⟳ Klicke LIVE um Halbzeit-Spiele zu laden</div>
-      </div>
-    </div>
-    <div class="panel">
-      <div class="sec">Heute · Alle Spiele</div>
-      <div id="todayWrap"><div class="empty" style="font-size:10px">Klicke LIVE</div></div>
-    </div>
-  </div>
-</div>
 
-<!-- FT TAB -->
-<div class="tab-content" id="tab-ft">
-  <div class="main-grid">
-    <div class="panel">
-      <button class="manual-toggle" onclick="toggleManual('ft')">+ Manuell (FT)</button>
+      <button class="manual-toggle" id="mToggleFt" onclick="toggleManual('ft')">
+        + Manuell FT <span class="arrow">›</span>
+      </button>
       <div class="manual-form" id="manualFt">
         <div class="mf-grid">
           <div class="mf-inp"><label>H2H Ø FT</label><input type="number" id="fH2H" placeholder="188" step="0.5" inputmode="decimal"></div>
@@ -411,35 +499,41 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;min-
           <div class="mf-inp"><label>Q3 Score Gast</label><input type="number" id="fQ3A" placeholder="22" inputmode="numeric"></div>
           <div class="mf-inp"><label>HZ Total</label><input type="number" id="fHZ" placeholder="90" inputmode="numeric"></div>
           <div class="mf-inp"><label>Fouls gesamt</label><input type="number" id="fFouls" placeholder="10" inputmode="numeric"></div>
-          <div class="mf-inp"><label>FT% Heim (%)</label><input type="number" id="fFTH" placeholder="78" inputmode="numeric"></div>
-          <div class="mf-inp"><label>FT% Gast (%)</label><input type="number" id="fFTA" placeholder="75" inputmode="numeric"></div>
+          <div class="mf-inp"><label>FT% Heim</label><input type="number" id="fFTH" placeholder="78" inputmode="numeric"></div>
+          <div class="mf-inp"><label>FT% Gast</label><input type="number" id="fFTA" placeholder="75" inputmode="numeric"></div>
         </div>
         <button class="btn-calc" onclick="calcManualFt()">▶ FT SIGNAL</button>
       </div>
-      <div class="sec">Q3 Break · FT Kandidaten</div>
-      <div class="games-wrap" id="ftGamesWrap">
-        <div class="empty">⟳ Klicke LIVE — zeigt Spiele am Q3 Break</div>
+    </div>
+
+    <!-- Today's games — scrollable, fills remaining height -->
+    <div class="today-section">
+      <div class="sec" style="margin:12px 14px 0;padding:0;">Heute · Alle Spiele</div>
+      <div class="today-inner" id="todayWrap">
+        <div class="empty" style="font-size:10px;margin-top:6px">Klicke LIVE</div>
       </div>
     </div>
-    <div class="panel">
-      <div class="sec">Heute · FT Ergebnisse</div>
-      <div id="ftTodayWrap"><div class="empty" style="font-size:10px">Klicke LIVE</div></div>
-    </div>
-  </div>
-</div>
+
+    <!-- Hidden — kept for JS compatibility -->
+    <div style="display:none" id="ftTodayWrap"></div>
+
+  </div><!-- /right-panel -->
+</div><!-- /app-shell -->
 
 <script>
-function switchTab(t){
-  document.querySelectorAll('.tab').forEach((el,i)=>el.classList.toggle('active',['hz','ft'][i]===t));
-  document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
-  document.getElementById('tab-'+t).classList.add('active');
-}
+// switchTab is kept for backwards-compat but does nothing in new layout
+function switchTab(){}
+
 function toggleManual(t){
-  document.getElementById(t==='hz'?'manualHz':'manualFt').classList.toggle('open');
+  const form=document.getElementById(t==='hz'?'manualHz':'manualFt');
+  const btn=document.getElementById(t==='hz'?'mToggleHz':'mToggleFt');
+  form.classList.toggle('open');
+  btn.classList.toggle('open');
 }
-function setLive(on){
+function setLive(on,count){
   document.getElementById('liveDot').className='dot'+(on?' live':'');
   document.getElementById('liveLabel').textContent=on?'LIVE':'OFFLINE';
+  if(count!=null)document.getElementById('liveCountNum').textContent=count;
 }
 
 async function loadLive(){
@@ -452,10 +546,12 @@ async function loadLive(){
     renderToday(d.today||[]);
     renderFtCandidates(d.q3||[]);
     renderFtToday(d.today||[]);
-    setLive(d.source==='live'&&(d.count||0)>0);
+    setLive(d.source==='live'&&(d.count||0)>0, (d.games||[]).length+(d.q3||[]).length);
+    document.getElementById('hzCount').textContent=(d.games||[]).length;
+    document.getElementById('ftCount').textContent=(d.q3||[]).length;
   }catch(e){
     document.getElementById('gamesWrap').innerHTML=`<div class="empty">⚠ ${e.message}</div>`;
-    setLive(false);
+    setLive(false,0);
   }
   btn.textContent='⟳ LIVE';btn.disabled=false;
 }
@@ -544,7 +640,7 @@ function ftEngine({h2h,line,q3h,q3a,hz,fouls,ftPctH,ftPctA}){
 function renderSignal(sig){
   const sd=document.getElementById('sigDir');
   sd.textContent=sig.dir;
-  sd.className='sig-dir-big'+(sig.dir==='UNDER'?' under':sig.dir==='OVER'?' over':'');
+  sd.className='sig-dir'+(sig.dir==='UNDER'?' under':sig.dir==='OVER'?' over':'');
   const se=document.getElementById('sigStufe');
   se.textContent=sig.stufe==='C'?'— SKIP —':`STUFE  ${sig.stufe}`;
   se.className=`sig-stufe st-${sig.stufe.toLowerCase()}`;
@@ -560,8 +656,8 @@ function renderSignal(sig){
   const fe=document.getElementById('ssFouls');
   fe.textContent=sig.fouls;
   fe.className='ss-v'+(sig.fouls>=8?' neg':'');
-  const strip=document.getElementById('signalStrip');
-  strip.className='signal-strip'+(sig.dir==='UNDER'?' under':sig.dir==='OVER'?' over':'')+(sig.stufe==='A'?' glow':'');
+  const card=document.getElementById('signalStrip');
+  card.className='signal-card'+(sig.dir==='UNDER'?' under':sig.dir==='OVER'?' over':'')+(sig.stufe==='A'?' glow':'');
 }
 
 // ── Manual calcs ──
@@ -579,7 +675,6 @@ function calcManualHz(){
     lineDrop:document.getElementById('chkDrop').classList.contains('on'),
     lineRise:document.getElementById('chkRise').classList.contains('on'),
   }));
-  window.scrollTo({top:0,behavior:'smooth'});
 }
 function calcManualFt(){
   const line=parseFloat(document.getElementById('fLine').value);
@@ -594,34 +689,33 @@ function calcManualFt(){
     ftPctH:parseFloat(document.getElementById('fFTH').value)||null,
     ftPctA:parseFloat(document.getElementById('fFTA').value)||null,
   }));
-  window.scrollTo({top:0,behavior:'smooth'});
 }
 
 // ── HZ Cards ──
 function renderHzGames(games){
   const w=document.getElementById('gamesWrap');
-  if(!games.length){w.innerHTML='<div class="empty">Keine HT/Q2 Spiele live<br><span style="font-size:9px">EU-Ligen meist 18–22 Uhr</span></div>';return;}
+  if(!games.length){w.innerHTML='<div class="empty">Keine HT/Q2 Spiele live<br><span style="font-size:9px;color:var(--dim)">EU-Ligen meist 18–22 Uhr</span></div>';return;}
   w.innerHTML=games.map(g=>hzCard(g)).join('');
 }
 function hzCard(g){
   const timer=g.timer||0;
-  const label=g.status==='HT'?'HALBZEIT':`Q2·${timer}′`;
+  const label=g.status==='HT'?'HALBZEIT':`Q2 · ${timer}′`;
   return`<div class="game-card" id="gc-${g.id}" onclick="selectHzCard(${g.id},${JSON.stringify(g.home)},${JSON.stringify(g.away)})">
     <div class="card-stripe"></div>
     <div class="card-body">
       <div class="card-top"><span class="card-league">${g.league_name}</span><span class="card-status">${label}</span></div>
       <div class="card-teams">
         <div class="card-team">${g.home}</div>
-        <div><div class="score-num">${g.total_home}–${g.total_away}</div><div class="score-q1">Q1:${g.q1_home}–${g.q1_away}</div></div>
+        <div class="score-block"><div class="score-num">${g.total_home}–${g.total_away}</div><div class="score-q1">Q1: ${g.q1_home}–${g.q1_away}</div></div>
         <div class="card-team away">${g.away}</div>
       </div>
       <div class="card-stats-row">
-        <div class="cs"><div class="cs-val">${g.q1_total}</div><div class="cs-lbl">Q1 Total</div></div>
-        <div class="cs"><div class="cs-val">${g.q2_live||'—'}</div><div class="cs-lbl">Q2 live</div></div>
-        <div class="cs"><div class="cs-val">${g.ht_total}</div><div class="cs-lbl">HT Total</div></div>
+        <div class="cs"><div class="cs-val">${g.q1_total}</div><div class="cs-lbl">Q1</div></div>
+        <div class="cs"><div class="cs-val">${g.q2_live||'—'}</div><div class="cs-lbl">Q2</div></div>
+        <div class="cs"><div class="cs-val">${g.ht_total}</div><div class="cs-lbl">HT</div></div>
       </div>
       <div class="card-bot">
-        <span class="h2h-note" id="h2hn-${g.id}">H2H laden...</span>
+        <span class="h2h-note" id="h2hn-${g.id}">H2H laden…</span>
         <span class="card-sig-badge none" id="badge-${g.id}">?</span>
         <span class="card-stufe-badge c" id="stufe-${g.id}"></span>
       </div>
@@ -640,43 +734,41 @@ async function selectHzCard(id,home,away){
   document.querySelectorAll('.game-card').forEach(c=>{c.classList.remove('selected');const ci=c.querySelector('.card-inputs');if(ci)ci.classList.remove('open');});
   const card=document.getElementById('gc-'+id);
   if(card){card.classList.add('selected');document.getElementById('ci-'+id).classList.add('open');}
-  const [h2hRes, statsRes] = await Promise.allSettled([
+  const [h2hRes,statsRes]=await Promise.allSettled([
     fetch(`/api/h2h?home=${encodeURIComponent(home)}&away=${encodeURIComponent(away)}`).then(r=>r.json()),
     fetch(`/api/game-stats/${id}`).then(r=>r.json()),
   ]);
   try{
-    const d=h2hRes.value;
-    const note=document.getElementById('h2hn-'+id);
-    const inp=document.getElementById('ih2h-'+id);
-    if(d.found){
-      note.textContent=`H2H Ø ${d.avg} (${d.count}x)`;note.className='h2h-note found';
-      if(inp&&!inp.value){inp.value=d.avg;document.getElementById('h2hlbl-'+id).textContent=`H2H Ø (${d.count}x)`;}
-    }else{note.textContent='H2H: kein Eintrag';note.className='h2h-note';}
+    const d=h2hRes.value;const note=document.getElementById('h2hn-'+id);const inp=document.getElementById('ih2h-'+id);
+    if(d.found){note.textContent=`H2H Ø ${d.avg} (${d.count}x)`;note.className='h2h-note found';
+      if(inp&&!inp.value){inp.value=d.avg;document.getElementById('h2hlbl-'+id).textContent=`H2H Ø (${d.count}x)`;}}
+    else{note.textContent='H2H: kein Eintrag';note.className='h2h-note';}
   }catch(e){document.getElementById('h2hn-'+id).textContent='H2H: Fehler';}
   try{
     const s=statsRes.value;
     if(s.found){
-      const foulsInp=document.getElementById('ifouls-'+id);
-      const ftInp=document.getElementById('ift-'+id);
-      const fgInp=document.getElementById('ifg-'+id);
-      if(foulsInp&&!foulsInp.value&&s.total_fouls>0) foulsInp.value=s.total_fouls;
-      if(ftInp&&!ftInp.value&&s.avg_ft_pct!=null) ftInp.value=s.avg_ft_pct;
-      if(fgInp&&!fgInp.value&&s.avg_fg_pct!=null) fgInp.value=s.avg_fg_pct;
+      const fi=document.getElementById('ifouls-'+id),ti=document.getElementById('ift-'+id),gi=document.getElementById('ifg-'+id);
+      if(fi&&!fi.value&&s.total_fouls>0)fi.value=s.total_fouls;
+      if(ti&&!ti.value&&s.avg_ft_pct!=null)ti.value=s.avg_ft_pct;
+      if(gi&&!gi.value&&s.avg_fg_pct!=null)gi.value=s.avg_fg_pct;
       const note=document.getElementById('h2hn-'+id);
-      const statsStr=s.total_fouls>0?` · Fouls:${s.total_fouls}`:'';
-      const ftStr=s.avg_ft_pct!=null?` · FT%:${s.avg_ft_pct}`:'';
-      if(note&&(statsStr||ftStr)) note.textContent+=(statsStr+ftStr);
+      const extra=(s.total_fouls>0?` · Fouls:${s.total_fouls}`:'')+
+                  (s.avg_ft_pct!=null?` · FT%:${s.avg_ft_pct}`:'');
+      if(note&&extra)note.textContent+=extra;
     }
   }catch(e){}
 }
 function calcHzCard(id,q1,q2live,timer){
-  const h2h=parseFloat(document.getElementById('ih2h-'+id).value)||null;
   const line=parseFloat(document.getElementById('iline-'+id).value);
-  const fouls=parseFloat(document.getElementById('ifouls-'+id).value)||0;
-  const ft=parseFloat(document.getElementById('ift-'+id)?.value)||null;
-  const fg=parseFloat(document.getElementById('ifg-'+id)?.value)||null;
   if(!line){alert('Bookie Line eingeben!');return;}
-  const sig=hzEngine({h2h,line,q1,q2:q2live,timer,fouls,ft,fg,lineDrop:false,lineRise:false});
+  const sig=hzEngine({
+    h2h:parseFloat(document.getElementById('ih2h-'+id).value)||null,
+    line,q1,q2:q2live,timer,
+    fouls:parseFloat(document.getElementById('ifouls-'+id).value)||0,
+    ft:parseFloat(document.getElementById('ift-'+id)?.value)||null,
+    fg:parseFloat(document.getElementById('ifg-'+id)?.value)||null,
+    lineDrop:false,lineRise:false,
+  });
   const card=document.getElementById('gc-'+id);
   const cls=sig.dir==='UNDER'?'sig-under':sig.dir==='OVER'?'sig-over':'';
   card.className=`game-card selected ${cls} ${sig.stufe==='A'?'sig-a':''}`;
@@ -685,13 +777,13 @@ function calcHzCard(id,q1,q2live,timer){
   const sEl=document.getElementById('stufe-'+id);
   sEl.className=`card-stufe-badge ${sig.stufe.toLowerCase()}`;
   sEl.textContent=sig.stufe==='C'?'SKIP':sig.stufe;
-  renderSignal(sig);window.scrollTo({top:0,behavior:'smooth'});
+  renderSignal(sig);
 }
 
 // ── Today list ──
 function renderToday(games){
   const w=document.getElementById('todayWrap');
-  if(!games.length){w.innerHTML='<div class="empty" style="font-size:10px">Keine Spiele heute</div>';return;}
+  if(!games.length){w.innerHTML='<div class="empty" style="font-size:10px;margin-top:6px">Keine Spiele heute</div>';return;}
   w.innerHTML=games.map(g=>{
     const sc=g.status==='FT'?'var(--dim2)':g.status==='HT'?'var(--gold)':g.status==='NS'?'var(--dim)':'var(--green)';
     return`<div class="today-card"><div class="card-stripe" style="background:${sc}"></div>
@@ -702,8 +794,7 @@ function renderToday(games){
           <div><div class="today-score">${g.total_home}–${g.total_away}</div><div class="today-q">Q1:${g.q1_total} Q2:${g.q2_live||'—'}</div></div>
           <div class="today-team away">${g.away}</div>
         </div>
-      </div>
-    </div>`;
+      </div></div>`;
   }).join('');
 }
 
@@ -722,16 +813,16 @@ function ftCard(g){
       <div class="card-top"><span class="card-league">${g.league_name}</span><span class="card-status">Q3 BREAK</span></div>
       <div class="card-teams">
         <div class="card-team">${g.home}</div>
-        <div><div class="score-num">${g.total_home}–${g.total_away}</div><div class="score-q1">HZ:${g.ht_total} Gap:${gap}</div></div>
+        <div class="score-block"><div class="score-num">${g.total_home}–${g.total_away}</div><div class="score-q1">HZ:${g.ht_total} Gap:${gap}</div></div>
         <div class="card-team away">${g.away}</div>
       </div>
       <div class="card-stats-row">
-        <div class="cs"><div class="cs-val">${g.ht_total}</div><div class="cs-lbl">HZ Total</div></div>
-        <div class="cs"><div class="cs-val">${q3tot||'—'}</div><div class="cs-lbl">Q3 Total</div></div>
+        <div class="cs"><div class="cs-val">${g.ht_total}</div><div class="cs-lbl">HZ</div></div>
+        <div class="cs"><div class="cs-val">${q3tot||'—'}</div><div class="cs-lbl">Q3</div></div>
         <div class="cs"><div class="cs-val">${gap}</div><div class="cs-lbl">Gap</div></div>
       </div>
       <div class="card-bot">
-        <span class="h2h-note" id="fth2hn-${g.id}">H2H FT laden...</span>
+        <span class="h2h-note" id="fth2hn-${g.id}">H2H FT laden…</span>
         <span class="card-sig-badge none" id="ftbadge-${g.id}">?</span>
         <span class="card-stufe-badge c" id="ftstufe-${g.id}"></span>
       </div>
@@ -751,8 +842,7 @@ async function selectFtCard(id,home,away){
   const card=document.getElementById('ftc-'+id);
   if(card){card.classList.add('selected');document.getElementById('ftci-'+id).classList.add('open');}
   try{
-    const r=await fetch(`/api/h2h?home=${encodeURIComponent(home)}&away=${encodeURIComponent(away)}&type=ft`);
-    const d=await r.json();
+    const d=await fetch(`/api/h2h?home=${encodeURIComponent(home)}&away=${encodeURIComponent(away)}&type=ft`).then(r=>r.json());
     const note=document.getElementById('fth2hn-'+id);
     if(d.found){
       note.textContent=`H2H FT Ø ${d.avg} (${d.count}x)`;note.className='h2h-note found';
@@ -779,23 +869,14 @@ function calcFtCard(id,hz,q3h,q3a){
   const sEl=document.getElementById('ftstufe-'+id);
   sEl.className=`card-stufe-badge ${sig.stufe.toLowerCase()}`;
   sEl.textContent=sig.stufe==='C'?'SKIP':sig.stufe;
-  renderSignal(sig);window.scrollTo({top:0,behavior:'smooth'});
+  renderSignal(sig);
 }
 function renderFtToday(games){
+  // kept for JS compatibility — today section shows all games incl. FT
   const w=document.getElementById('ftTodayWrap');
+  if(!w)return;
   const done=games.filter(g=>g.status==='FT');
-  if(!done.length){w.innerHTML='<div class="empty" style="font-size:10px">Noch keine FT Ergebnisse heute</div>';return;}
-  w.innerHTML=done.map(g=>`<div class="today-card">
-    <div class="card-stripe" style="background:var(--dim2)"></div>
-    <div class="today-body">
-      <div class="today-top"><span class="today-league">${g.league_name}</span><span class="today-status" style="color:var(--dim2)">FT</span></div>
-      <div class="today-teams">
-        <div class="today-team">${g.home}</div>
-        <div><div class="today-score">${g.total_home}–${g.total_away}</div><div class="today-q">Total:${g.total_home+g.total_away}</div></div>
-        <div class="today-team away">${g.away}</div>
-      </div>
-    </div>
-  </div>`).join('');
+  w.innerHTML=done.map(g=>`<div>${g.home} vs ${g.away} — ${g.total_home+g.total_away}</div>`).join('');
 }
 </script>
 </body>
@@ -1370,18 +1451,48 @@ async def get_h2h(home: str, away: str, type: str = "hz"):
     return {"avg": avg, "count": len(vals), "found": avg is not None, "type": type}
 
 
+def _safe_pct(val) -> Optional[float]:
+    """Convert percentage value to float — API-Sports returns strings like '43.8' or None."""
+    if val is None or val == "" or val == "0":
+        return None
+    try:
+        f = float(val)
+        return round(f, 1) if f > 0 else None
+    except (ValueError, TypeError):
+        return None
+
+
 def _parse_team_stats(t: dict) -> dict:
-    """Extract fouls and shooting percentages from one team's statistics block."""
-    fg = t.get("field_goals", {})
-    ft = t.get("freethrows_goals", {})
+    """
+    Extract fouls and shooting percentages from one team's statistics block.
+
+    API-Sports basketball stats response structure:
+      t = {
+        "team": {"id": 1, "name": "..."},
+        "statistics": [          <-- nested array, we take index 0
+          {
+            "field_goals":       {"made": 35, "attempts": 80, "percentage": "43.8"},
+            "freethrows_goals":  {"made": 14, "attempts": 18, "percentage": "77.8"},
+            "personal_fouls":    18,
+            ...
+          }
+        ]
+      }
+    """
+    # Drill into the nested statistics array
+    stats_list = t.get("statistics") or []
+    s  = stats_list[0] if stats_list else {}
+    fg = s.get("field_goals") or {}
+    ft = s.get("freethrows_goals") or {}
+
     return {
         "team_id":   t.get("team", {}).get("id"),
         "team_name": t.get("team", {}).get("name", ""),
-        "fouls":     t.get("personal_fouls") or 0,
-        "ft_pct":    ft.get("percentage") or None,
-        "ft_made":   ft.get("total") or 0,
+        "fouls":     s.get("personal_fouls") or 0,
+        "ft_pct":    _safe_pct(ft.get("percentage")),
+        "ft_made":   ft.get("total") or ft.get("made") or 0,
         "ft_att":    ft.get("attempts") or 0,
-        "fg_pct":    fg.get("percentage") or None,
+        "fg_pct":    _safe_pct(fg.get("percentage")),
     }
 
 
@@ -1542,6 +1653,29 @@ async def reload_cache():
         "hz_matchups": len(_h2h_cache),
         "ft_matchups": len(_ft_h2h_cache),
     }
+
+
+@app.get("/api/debug-stats/{game_id}")
+async def debug_stats(game_id: int):
+    """
+    Return the raw API-Sports statistics response for a game.
+    Use this to inspect the exact response structure if stats are not parsing correctly.
+    Example: /api/debug-stats/12345
+    """
+    if not API_KEY:
+        return {"error": "API_SPORTS_KEY not set"}
+    try:
+        data = await api_get("games/statistics", {"id": game_id})
+        teams = data.get("response") or []
+        return {
+            "game_id":      game_id,
+            "teams_count":  len(teams),
+            "raw_response": teams,
+            # Show what _parse_team_stats would extract for each team
+            "parsed":       [_parse_team_stats(t) for t in teams] if teams else [],
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @app.get("/api/debug-sheets")
