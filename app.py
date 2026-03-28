@@ -946,26 +946,40 @@ async def get_h2h(home: str, away: str, type: str = "hz"):
 
 
 @app.get("/api/backfill")
-async def backfill(days: int = Query(default=30, ge=1, le=90)):
+async def backfill(
+    days: int = Query(default=7, ge=1, le=14),
+    offset: int = Query(default=0, ge=0, le=180),
+):
     """
     Backfill Google Sheet with historical FT data.
-    GET /api/backfill?days=30  — iterates last N days, writes missing FT games.
+    Use small batches to avoid OOM on free Render plan.
+    Example sequence:
+      /api/backfill?days=7&offset=0   (yesterday to 7 days ago)
+      /api/backfill?days=7&offset=7   (8-14 days ago)
+      /api/backfill?days=7&offset=14  (15-21 days ago)
     """
     if not API_KEY:
         raise HTTPException(status_code=400, detail="API_SPORTS_KEY not set")
     total = 0
     today = _date.today()
-    for i in range(1, days + 1):
+    for i in range(1 + offset, days + offset + 1):
         target = (today - timedelta(days=i)).isoformat()
         try:
             written = await _extract_ft_games(target)
             total += written
         except Exception as e:
             logging.warning("Backfill %s: %s", target, e)
-        await asyncio.sleep(0.4)   # rate-limit buffer
+        await asyncio.sleep(0.5)
     await asyncio.to_thread(_load_h2h_from_sheet)
-    return {"status": "done", "days_processed": days, "rows_written": total,
-            "hz_matchups": len(_h2h_cache), "ft_matchups": len(_ft_h2h_cache)}
+    return {
+        "status": "done",
+        "days_processed": days,
+        "offset": offset,
+        "range": f"{offset+1}–{offset+days} days ago",
+        "rows_written": total,
+        "hz_matchups": len(_h2h_cache),
+        "ft_matchups": len(_ft_h2h_cache),
+    }
 
 
 @app.get("/api/trigger-extract")
