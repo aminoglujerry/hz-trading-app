@@ -560,6 +560,8 @@ function hzCard(g){
       <div class="inp-group"><label id="h2hlbl-${g.id}">H2H Ø</label><input type="number" id="ih2h-${g.id}" placeholder="96.5" step="0.5" inputmode="decimal"></div>
       <div class="inp-group"><label>Bookie Line</label><input type="number" id="iline-${g.id}" placeholder="91.5" step="0.5" inputmode="decimal"></div>
       <div class="inp-group"><label>Fouls</label><input type="number" id="ifouls-${g.id}" placeholder="5" min="0" inputmode="numeric"></div>
+      <div class="inp-group"><label>FT% Ø</label><input type="number" id="ift-${g.id}" placeholder="—" inputmode="numeric"></div>
+      <div class="inp-group"><label>FG%</label><input type="number" id="ifg-${g.id}" placeholder="—" inputmode="numeric"></div>
       <button class="calc-mini" onclick="event.stopPropagation();calcHzCard(${g.id},${g.q1_total},${g.q2_live||0},${timer})">▶ SIGNAL</button>
     </div>
   </div>`;
@@ -568,9 +570,14 @@ async function selectHzCard(id,home,away){
   document.querySelectorAll('.game-card').forEach(c=>{c.classList.remove('selected');const ci=c.querySelector('.card-inputs');if(ci)ci.classList.remove('open');});
   const card=document.getElementById('gc-'+id);
   if(card){card.classList.add('selected');document.getElementById('ci-'+id).classList.add('open');}
+  // Fetch H2H + live stats in parallel
+  const [h2hRes, statsRes] = await Promise.allSettled([
+    fetch(`/api/h2h?home=${encodeURIComponent(home)}&away=${encodeURIComponent(away)}`).then(r=>r.json()),
+    fetch(`/api/game-stats/${id}`).then(r=>r.json()),
+  ]);
+  // H2H
   try{
-    const r=await fetch(`/api/h2h?home=${encodeURIComponent(home)}&away=${encodeURIComponent(away)}`);
-    const d=await r.json();
+    const d=h2hRes.value;
     const note=document.getElementById('h2hn-'+id);
     const inp=document.getElementById('ih2h-'+id);
     if(d.found){
@@ -578,13 +585,32 @@ async function selectHzCard(id,home,away){
       if(inp&&!inp.value){inp.value=d.avg;document.getElementById('h2hlbl-'+id).textContent=`H2H Ø (${d.count}x)`;}
     }else{note.textContent='H2H: kein Eintrag';note.className='h2h-note';}
   }catch(e){document.getElementById('h2hn-'+id).textContent='H2H: Fehler';}
+  // Live stats — auto-fill fouls, FT%, FG%
+  try{
+    const s=statsRes.value;
+    if(s.found){
+      const foulsInp=document.getElementById('ifouls-'+id);
+      const ftInp=document.getElementById('ift-'+id);
+      const fgInp=document.getElementById('ifg-'+id);
+      if(foulsInp&&!foulsInp.value&&s.total_fouls>0) foulsInp.value=s.total_fouls;
+      if(ftInp&&!ftInp.value&&s.avg_ft_pct!=null) ftInp.value=s.avg_ft_pct;
+      if(fgInp&&!fgInp.value&&s.avg_fg_pct!=null) fgInp.value=s.avg_fg_pct;
+      // Update stats note
+      const note=document.getElementById('h2hn-'+id);
+      const statsStr=s.total_fouls>0?` · Fouls:${s.total_fouls}`:'';
+      const ftStr=s.avg_ft_pct!=null?` · FT%:${s.avg_ft_pct}`:'';
+      if(note&&(statsStr||ftStr)) note.textContent+=(statsStr+ftStr);
+    }
+  }catch(e){}
 }
 function calcHzCard(id,q1,q2live,timer){
   const h2h=parseFloat(document.getElementById('ih2h-'+id).value)||null;
   const line=parseFloat(document.getElementById('iline-'+id).value);
   const fouls=parseFloat(document.getElementById('ifouls-'+id).value)||0;
+  const ft=parseFloat(document.getElementById('ift-'+id)?.value)||null;
+  const fg=parseFloat(document.getElementById('ifg-'+id)?.value)||null;
   if(!line){alert('Bookie Line eingeben!');return;}
-  const sig=hzEngine({h2h,line,q1,q2:q2live,timer,fouls,ft:null,fg:null,lineDrop:false,lineRise:false});
+  const sig=hzEngine({h2h,line,q1,q2:q2live,timer,fouls,ft,fg,lineDrop:false,lineRise:false});
   const card=document.getElementById('gc-'+id);
   const cls=sig.dir==='UNDER'?'sig-under':sig.dir==='OVER'?'sig-over':'';
   card.className=`game-card selected ${cls} ${sig.stufe==='A'?'sig-a':''}`;
@@ -940,6 +966,53 @@ async def get_h2h(home: str, away: str, type: str = "hz"):
     vals  = cache.get(key, [])
     avg   = round(sum(vals) / len(vals), 1) if vals else None
     return {"avg": avg, "count": len(vals), "found": avg is not None, "type": type}
+
+
+@app.get("/api/game-stats/{game_id}")
+async def get_game_stats(game_id: int):
+    """
+    Fetch live stats for a game: fouls, FT%, FG% per team.
+    Called automatically when a game card is selected.
+    """
+    if not API_KEY:
+        return {"found": False}
+    try:
+        data = await api_get("games/statistics", {"id": game_id})
+        teams = data.get("response") or []
+        if not teams:
+            return {"found": False}
+
+        def parse_team(t: dict) -> dict:
+            fg  = t.get("field_goals", {})
+            ft  = t.get("freethrows_goals", {})
+            return {
+                "team_id":   t.get("team", {}).get("id"),
+                "team_name": t.get("team", {}).get("name", ""),
+                "fouls":     t.get("personal_fouls") or 0,
+                "ft_pct":    ft.get("percentage") or None,
+                "ft_made":   ft.get("total") or 0,
+                "ft_att":    ft.get("attempts") or 0,
+                "fg_pct":    fg.get("percentage") or None,
+            }
+
+        parsed = [parse_team(t) for t in teams]
+        total_fouls = sum(p["fouls"] for p in parsed)
+        ft_pcts = [p["ft_pct"] for p in parsed if p["ft_pct"] is not None]
+        fg_pcts = [p["fg_pct"] for p in parsed if p["fg_pct"] is not None]
+
+        return {
+            "found": True,
+            "teams": parsed,
+            "total_fouls": total_fouls,
+            "avg_ft_pct":  round(sum(ft_pcts) / len(ft_pcts), 1) if ft_pcts else None,
+            "avg_fg_pct":  round(sum(fg_pcts) / len(fg_pcts), 1) if fg_pcts else None,
+            # Home = first team, Away = second team (API convention)
+            "home_ft_pct": parsed[0]["ft_pct"] if len(parsed) > 0 else None,
+            "away_ft_pct": parsed[1]["ft_pct"] if len(parsed) > 1 else None,
+        }
+    except Exception as e:
+        logging.warning("game-stats %s: %s", game_id, e)
+        return {"found": False, "error": str(e)}
 
 
 @app.get("/api/backfill")
