@@ -19,23 +19,43 @@ SHEETS_ID  = os.getenv("GOOGLE_SHEETS_ID", "")
 SHEETS_TAB = os.getenv("GOOGLE_SHEETS_TAB", "h2h_2025_2026")
 CREDS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
 
-# Leagues — alle relevanten Ligen, später filtern
+# Leagues — breit aufgestellt, API liefert was sie hat
 LEAGUES: dict = {
-    120: ("TBL",        "2025-2026"),
-    4:   ("ACB",        "2025-2026"),
-    6:   ("ABA Liga",   "2025-2026"),
-    23:  ("LNB Pro A",  "2025-2026"),
-    8:   ("Lega A",     "2025-2026"),
-    3:   ("EuroLeague", "2025-2026"),
-    2:   ("EuroCup",    "2025-2026"),
-    15:  ("BBL",        "2025-2026"),
-    11:  ("GBL",        "2025-2026"),
-    22:  ("BCL",        "2025-2026"),
-    12:  ("NBA",        "2025"),
-    5:   ("VTB",        "2025-2026"),
-    16:  ("Jeep Elite", "2025-2026"),
-    19:  ("NBB",        "2025-2026"),
-    38:  ("Sueper Lig", "2025-2026"),
+    120: ("TBL",         "2025-2026"),
+    4:   ("ACB",         "2025-2026"),
+    6:   ("ABA Liga",    "2025-2026"),
+    23:  ("LNB Pro A",   "2025-2026"),
+    8:   ("Lega A",      "2025-2026"),
+    3:   ("EuroLeague",  "2025-2026"),
+    2:   ("EuroCup",     "2025-2026"),
+    15:  ("BBL",         "2025-2026"),
+    11:  ("GBL",         "2025-2026"),
+    22:  ("BCL",         "2025-2026"),
+    12:  ("NBA",         "2025"),
+    5:   ("VTB",         "2025-2026"),
+    16:  ("Jeep Elite",  "2025-2026"),
+    19:  ("NBB",         "2025-2026"),
+    38:  ("Sueper Lig",  "2025-2026"),
+    117: ("LNB Pro B",   "2025-2026"),
+    14:  ("BSL",         "2025-2026"),
+    17:  ("Korisliiga",  "2025-2026"),
+    18:  ("Korisliiga W","2025-2026"),
+    24:  ("Pro B",       "2025-2026"),
+    7:   ("Adriatic",    "2025-2026"),
+    9:   ("Lega A2",     "2025-2026"),
+    10:  ("A1 GR",       "2025-2026"),
+    13:  ("CBA",         "2025-2026"),
+    20:  ("Orlen BP",    "2025-2026"),
+    25:  ("NLA",         "2025-2026"),
+    29:  ("NBL",         "2025-2026"),
+    30:  ("Superliga",   "2025-2026"),
+    31:  ("Divizia A",   "2025-2026"),
+    32:  ("PBL",         "2025-2026"),
+    33:  ("LKL",         "2025-2026"),
+    34:  ("Premijer",    "2025-2026"),
+    36:  ("SBL",         "2025-2026"),
+    37:  ("Extraliga",   "2025-2026"),
+    40:  ("Superleague", "2025-2026"),
 }
 
 _h2h_cache:    dict = {}   # matchup_key -> [ht_total, ...]
@@ -751,6 +771,14 @@ def _get_worksheet():
         sh  = gc.open_by_key(SHEETS_ID)
         try:
             _ws = sh.worksheet(SHEETS_TAB)
+            # Ensure header row is correct — if row 1 doesn't match, clear and rewrite
+            first_row = _ws.row_values(1)
+            expected = ["date", "home", "away", "league", "q1_total", "q2_total", "ht_total", "ft_total"]
+            if first_row != expected:
+                # Sheet exists but has wrong headers — clear and set correct ones
+                _ws.clear()
+                _ws.append_row(expected)
+                logging.info("Fixed sheet headers (were: %s)", first_row)
         except gspread.WorksheetNotFound:
             _ws = sh.add_worksheet(title=SHEETS_TAB, rows=2000, cols=10)
             _ws.append_row(["date", "home", "away", "league",
