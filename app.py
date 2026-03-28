@@ -429,6 +429,48 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;}
   font-size:17px;font-weight:900;color:var(--white);}
 .today-q{font-size:8px;color:var(--dim2);margin-top:1px;text-align:center;}
 
+/* ── Preview cards (pre-game section) ── */
+.preview-card{
+  background:var(--s2);border:1px solid var(--border);
+  display:grid;grid-template-columns:3px 1fr;margin-top:2px;
+  transition:border-color .12s;
+}
+.preview-card.no-h2h{opacity:.55;}
+.preview-card.watched{border-color:var(--gold);}
+.preview-card.watched .card-stripe{background:var(--gold);}
+.preview-body{padding:8px 10px;}
+.preview-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;}
+.preview-teams{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;}
+.preview-team{font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;
+  color:var(--white);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.preview-team.away{text-align:right;}
+.preview-vs{font-size:10px;color:var(--dim2);padding:0 6px;flex-shrink:0;}
+.preview-line-row{display:flex;align-items:center;gap:6px;margin-top:5px;}
+.preview-line-row label{font-size:8px;letter-spacing:1px;color:var(--dim2);
+  text-transform:uppercase;white-space:nowrap;flex-shrink:0;}
+.preview-line-row input{
+  flex:1;background:var(--bg);border:1px solid var(--border2);color:var(--white);
+  font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:600;
+  padding:4px 6px;outline:none;min-width:0;
+}
+.preview-line-row input:focus{border-color:var(--under);}
+.preview-bot{display:flex;justify-content:space-between;align-items:center;
+  padding-top:5px;border-top:1px solid var(--border);}
+.preview-h2h{font-size:9px;color:var(--dim2);letter-spacing:.5px;}
+.preview-h2h.found{color:var(--green);}
+.preview-h2h.missing{color:var(--over);font-style:italic;}
+.preview-right{display:flex;align-items:center;gap:5px;}
+.preview-signal{font-size:9px;font-weight:700;letter-spacing:1px;padding:2px 7px;border:1px solid;}
+.preview-signal.under{color:var(--under);border-color:rgba(0,180,216,.3);}
+.preview-signal.over{color:var(--over);border-color:rgba(230,57,70,.3);}
+.preview-signal.neutral{color:var(--dim);border-color:var(--border);}
+.preview-signal.pending{color:var(--dim);border-color:var(--border);}
+.preview-star{background:none;border:none;cursor:pointer;font-size:15px;
+  color:var(--dim);padding:1px 3px;transition:color .15s;line-height:1;}
+.preview-star:hover{color:var(--gold);}
+.preview-star.on{color:var(--gold);}
+.watch-badge{font-size:11px;color:var(--gold);margin-left:4px;line-height:1;}
+
 /* Mobile */
 @media(max-width:800px){
   html,body{overflow:auto;}
@@ -479,6 +521,11 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;}
     <div class="sec">FT · Q3 Break <span class="sec-badge" id="ftCount">0</span></div>
     <div class="games-wrap" id="ftGamesWrap">
       <div class="empty">⟳ Klicke LIVE — zeigt Spiele am Q3 Break</div>
+    </div>
+
+    <div class="sec">Heute · Vorschau <span class="sec-badge" id="previewCount">0</span></div>
+    <div class="games-wrap" id="previewWrap">
+      <div class="empty">⟳ Klicke LIVE — zeigt heutige NS-Spiele</div>
     </div>
   </div>
 
@@ -627,6 +674,7 @@ async function loadLive(silent=false){
     renderToday(d.today||[]);
     renderFtCandidates(d.q3||[]);
     renderFtToday(d.today||[]);
+    renderPreview(d.today||[]);
     const liveCount=(d.games||[]).length+(d.q3||[]).length;
     setLive(d.source==='live'&&(d.count||0)>0,liveCount);
     document.getElementById('hzCount').textContent=(d.games||[]).length;
@@ -780,6 +828,9 @@ function calcManualFt(){
   }));
 }
 
+// ── Watchlist (loaded early — used by hzCard / ftCard) ──
+const _watchlist=new Set(JSON.parse(localStorage.getItem('hz_watchlist')||'[]'));
+
 // ── HZ Cards ──
 function renderHzGames(games){
   const w=document.getElementById('gamesWrap');
@@ -790,10 +841,11 @@ function hzCard(g){
   const isHT=g.status==='HT';
   const timer=g.timer||0;
   const label=isHT?'HALBZEIT':`Q2 · ${timer}′`;
+  const wl=_watchlist.has(g.id)?'<span class="watch-badge" id="watch-hz-'+g.id+'">★</span>':'<span class="watch-badge" id="watch-hz-'+g.id+'" style="display:none">★</span>';
   return`<div class="game-card" id="gc-${g.id}" onclick="selectHzCard(${g.id},${JSON.stringify(g.home).replace(/"/g,'&quot;')},${JSON.stringify(g.away).replace(/"/g,'&quot;')})">
     <div class="card-stripe"></div>
     <div class="card-body">
-      <div class="card-top"><span class="card-league">${g.league_name}</span><span class="card-status">${label}</span></div>
+      <div class="card-top"><span class="card-league">${g.league_name}${wl}</span><span class="card-status">${label}</span></div>
       <div class="card-teams">
         <div class="card-team">${g.home}</div>
         <div class="score-block"><div class="score-num">${g.total_home}–${g.total_away}</div><div class="score-q1">Q1: ${g.q1_home}–${g.q1_away}</div></div>
@@ -897,10 +949,11 @@ function renderFtCandidates(games){
 function ftCard(g){
   const q3tot=(g.q3_home||0)+(g.q3_away||0);
   const gap=Math.abs((g.q3_home||0)-(g.q3_away||0));
+  const wl=_watchlist.has(g.id)?'<span class="watch-badge" id="watch-ft-'+g.id+'">★</span>':'<span class="watch-badge" id="watch-ft-'+g.id+'" style="display:none">★</span>';
   return`<div class="ft-card" id="ftc-${g.id}" onclick="selectFtCard(${g.id},${JSON.stringify(g.home).replace(/"/g,'&quot;')},${JSON.stringify(g.away).replace(/"/g,'&quot;')})">
     <div class="card-stripe"></div>
     <div class="ft-body">
-      <div class="card-top"><span class="card-league">${g.league_name}</span><span class="card-status">Q3 BREAK</span></div>
+      <div class="card-top"><span class="card-league">${g.league_name}${wl}</span><span class="card-status">Q3 BREAK</span></div>
       <div class="card-teams">
         <div class="card-team">${g.home}</div>
         <div class="score-block"><div class="score-num">${g.total_home}–${g.total_away}</div><div class="score-q1">HZ:${g.ht_total} Gap:${gap}</div></div>
@@ -986,6 +1039,108 @@ function renderFtToday(games){
   if(!w)return;
   const done=games.filter(g=>g.status==='FT');
   w.innerHTML=done.map(g=>`<div>${g.home} vs ${g.away} — ${g.total_home+g.total_away}</div>`).join('');
+}
+
+// ── Watchlist ──
+function _saveWatchlist(){
+  try{localStorage.setItem('hz_watchlist',JSON.stringify([..._watchlist]));}catch(e){}
+}
+function toggleWatchlist(id){
+  if(_watchlist.has(id)){_watchlist.delete(id);}else{_watchlist.add(id);}
+  _saveWatchlist();
+  const btn=document.getElementById('pw-star-'+id);
+  const on=_watchlist.has(id);
+  if(btn)btn.className='preview-star'+(on?' on':'');
+  const card=document.getElementById('pw-'+id);
+  if(card)card.classList.toggle('watched',on);
+  ['hz','ft'].forEach(t=>{
+    const b=document.getElementById('watch-'+t+'-'+id);
+    if(b)b.style.display=on?'inline':'none';
+  });
+}
+
+// ── Pre-Game Preview ──
+function _preSignalLabel(h2h,line){
+  if(h2h==null||line==null)return null;
+  const buf=h2h-line;
+  if(buf>=5)return{txt:'UNDER ▾',cls:'under'};
+  if(buf<=-5)return{txt:'OVER ▴',cls:'over'};
+  return{txt:'NEUTRAL',cls:'neutral'};
+}
+function calcPreSignal(id){
+  const h2hEl=document.getElementById('pw-h2h-'+id);
+  const h2h=h2hEl?parseFloat(h2hEl.dataset.avg)||null:null;
+  const lineEl=document.getElementById('pw-line-'+id);
+  const line=lineEl?parseFloat(lineEl.value)||null:null;
+  const sig=document.getElementById('pw-sig-'+id);
+  if(!sig)return;
+  const r=_preSignalLabel(h2h,line);
+  if(!r){sig.textContent='—';sig.className='preview-signal pending';return;}
+  sig.textContent=r.txt;sig.className='preview-signal '+r.cls;
+}
+function previewCard(g){
+  const watched=_watchlist.has(g.id);
+  return`<div class="preview-card${watched?' watched':''}" id="pw-${g.id}">
+    <div class="card-stripe"></div>
+    <div class="preview-body">
+      <div class="preview-top">
+        <span class="card-league">${g.league_name}</span>
+        <span class="card-status" style="color:var(--dim2)">${g.status}${g.timer?' '+g.timer+'′':''}</span>
+      </div>
+      <div class="preview-teams">
+        <div class="preview-team">${g.home}</div>
+        <div class="preview-vs">vs</div>
+        <div class="preview-team away">${g.away}</div>
+      </div>
+      <div class="preview-line-row">
+        <label>Bookie Line</label>
+        <input type="number" id="pw-line-${g.id}" placeholder="—" step="0.5" inputmode="decimal"
+          oninput="calcPreSignal(${g.id})">
+      </div>
+      <div class="preview-bot">
+        <span class="preview-h2h" id="pw-h2h-${g.id}">H2H laden…</span>
+        <div class="preview-right">
+          <span class="preview-signal pending" id="pw-sig-${g.id}">—</span>
+          <button class="preview-star${watched?' on':''}" id="pw-star-${g.id}"
+            onclick="event.stopPropagation();toggleWatchlist(${g.id})" title="Watchlist">★</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+async function _loadPreviewH2H(g){
+  try{
+    const d=await fetch(`/api/h2h?home=${encodeURIComponent(g.home)}&away=${encodeURIComponent(g.away)}`).then(r=>{if(!r.ok)throw new Error(r.status);return r.json();});
+    const note=document.getElementById('pw-h2h-'+g.id);
+    if(!note)return;
+    if(d.found){
+      note.textContent=`H2H Ø ${d.avg} (${d.count}x)`;
+      note.className='preview-h2h found';
+      note.dataset.avg=d.avg;
+      const card=document.getElementById('pw-'+g.id);
+      if(card)card.classList.remove('no-h2h');
+    }else{
+      note.textContent='H2H fehlt';
+      note.className='preview-h2h missing';
+      const card=document.getElementById('pw-'+g.id);
+      if(card)card.classList.add('no-h2h');
+    }
+    calcPreSignal(g.id);
+  }catch(e){
+    const note=document.getElementById('pw-h2h-'+g.id);
+    if(note){note.textContent='H2H: Fehler';note.className='preview-h2h missing';}
+  }
+}
+async function renderPreview(games){
+  const ns=games.filter(g=>g.status==='NS');
+  document.getElementById('previewCount').textContent=ns.length;
+  const w=document.getElementById('previewWrap');
+  if(!ns.length){
+    w.innerHTML='<div class="empty" style="font-size:10px">Keine Vorschau-Spiele (NS)</div>';
+    return;
+  }
+  w.innerHTML=ns.map(g=>previewCard(g)).join('');
+  await Promise.allSettled(ns.map(g=>_loadPreviewH2H(g)));
 }
 
 // ── Live calculation while typing (debounced 400ms) ──
@@ -1922,4 +2077,14 @@ def _demo_today() -> list:
          "q1_home": 26, "q1_away": 21, "q2_home": 22, "q2_away": 24,
          "q3_home": 0,  "q3_away": 0,
          "total_home": 88, "total_away": 79, "q1_total": 47, "q2_live": 46, "ht_total": 93},
+        {"id": 3002, "league_id": 3, "league_name": "EuroLeague", "status": "NS", "timer": None,
+         "home": "Real Madrid", "away": "Anadolu Efes",
+         "q1_home": 0, "q1_away": 0, "q2_home": 0, "q2_away": 0,
+         "q3_home": 0, "q3_away": 0,
+         "total_home": 0, "total_away": 0, "q1_total": 0, "q2_live": 0, "ht_total": 0},
+        {"id": 3003, "league_id": 4, "league_name": "ACB", "status": "NS", "timer": None,
+         "home": "Barcelona", "away": "Valencia Basket",
+         "q1_home": 0, "q1_away": 0, "q2_home": 0, "q2_away": 0,
+         "q3_home": 0, "q3_away": 0,
+         "total_home": 0, "total_away": 0, "q1_total": 0, "q2_live": 0, "ht_total": 0},
     ]
