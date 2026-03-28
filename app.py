@@ -9,6 +9,11 @@ import logging
 import os
 from typing import Optional
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
+
 API_KEY = os.getenv("API_SPORTS_KEY", "")
 API_BASE = "https://v1.basketball.api-sports.io"
 
@@ -31,7 +36,7 @@ LEAGUES = {
 }
 
 # ---------- Google Sheets / H2H state ----------
-_h2h_cache: dict = {}   # matchup_key -> [ft_total, ...]
+_h2h_cache: dict = {}   # matchup_key -> [ht_total, ...]  (halftime totals, Q1+Q2 combined)
 _seen_ft_ids: set = set()
 _ws = None               # cached gspread Worksheet
 
@@ -468,18 +473,31 @@ function engine({h2h,line,q1,q2,timer,fouls,ft,fg,lineDrop,lineRise}){
   let q2proj=timer>0.5&&q2>0?q2+(q2/timer)*timeLeft:q1;
   const proj=q1+q2proj;
   const buffer=proj-line;
+  // H2H historical edge: positive = historically above line (UNDER lean), negative = below line (OVER lean)
+  const h2hBuf=h2h!=null&&h2h>0?h2h-line:null;
   const foulsOC=fouls>=8,ftOC=ft!==null&&ft>=85,lineMC=lineDrop||lineRise;
-  const overCat=foulsOC||ftOC||lineMC;
+  const h2hOverCat=h2hBuf!==null&&h2hBuf<=-3;   // H2H historically below line → OVER catalyst
+  const h2hUnder=h2hBuf!==null&&h2hBuf>=0;       // H2H doesn't contradict UNDER
+  const overCat=foulsOC||ftOC||lineMC||h2hOverCat;
   const fgSkip=fg!==null&&fg>60;
   const entryOk=timeLeft>=2.5,entryA=timeLeft>=3.5;
   let dir='SKIP',stufe='C',reasons=[];
   if(buffer>=5&&entryOk&&fouls<8&&!fgSkip){
     dir='UNDER';
-    if(entryA){stufe='A';reasons=[`<span class="r-ok">✓ Buffer +${buffer.toFixed(1)} ≥ 5</span>`,`<span class="r-ok">✓ Entry ${timeLeft.toFixed(1)}′</span>`,`<span class="r-ok">✓ Fouls ${fouls} &lt; 8</span>`];}
-    else{stufe='B';reasons=[`<span class="r-warn">~ Buffer +${buffer.toFixed(1)}</span>`,`<span class="r-warn">~ Entry ${timeLeft.toFixed(1)}′</span>`];}
+    if(entryA){
+      // H2H contradicting UNDER (h2h below line — historically OVER lean) downgrades A → B
+      if(h2hBuf!==null&&h2hBuf<0){
+        stufe='B';
+        reasons=[`<span class="r-ok">✓ Buffer +${buffer.toFixed(1)} ≥ 5</span>`,`<span class="r-warn">~ H2H ${h2h} &lt; Linie (${h2hBuf.toFixed(1)}) — kontra</span>`];
+      }else{
+        stufe='A';
+        reasons=[`<span class="r-ok">✓ Buffer +${buffer.toFixed(1)} ≥ 5</span>`,`<span class="r-ok">✓ Entry ${timeLeft.toFixed(1)}′</span>`,`<span class="r-ok">✓ Fouls ${fouls} &lt; 8</span>`];
+        if(h2hBuf!==null&&h2hBuf>=3)reasons.push(`<span class="r-ok">✓ H2H +${h2hBuf.toFixed(1)} bestätigt UNDER</span>`);
+      }
+    }else{stufe='B';reasons=[`<span class="r-warn">~ Buffer +${buffer.toFixed(1)}</span>`,`<span class="r-warn">~ Entry ${timeLeft.toFixed(1)}′</span>`];}
   }else if(buffer<=-3&&entryOk){
     dir='OVER';
-    if(overCat){stufe='A';if(foulsOC)reasons.push(`<span class="r-ok">🔥 Fouls ${fouls} ≥ 8</span>`);if(ftOC)reasons.push(`<span class="r-ok">🔥 FT% ${ft}%</span>`);if(lineMC)reasons.push(`<span class="r-ok">🔥 Linie bewegt</span>`);}
+    if(overCat){stufe='A';if(foulsOC)reasons.push(`<span class="r-ok">🔥 Fouls ${fouls} ≥ 8</span>`);if(ftOC)reasons.push(`<span class="r-ok">🔥 FT% ${ft}%</span>`);if(lineMC)reasons.push(`<span class="r-ok">🔥 Linie bewegt</span>`);if(h2hOverCat)reasons.push(`<span class="r-ok">🔥 H2H ${h2hBuf.toFixed(1)} unter Linie</span>`);}
     else{stufe='B';reasons.push(`<span class="r-warn">~ ${buffer.toFixed(1)} unter Linie</span>`);reasons.push(`<span class="r-warn">~ Kein Katalysator</span>`);}
     reasons.push(`<span class="r-ok">✓ Entry ${timeLeft.toFixed(1)}′</span>`);
   }else{
@@ -590,6 +608,7 @@ async def get_live_games():
     live_results, today_results, seen_ids = [], [], set()
 
     for league_id, (name, season) in LEAGUES.items():
+        # Live query (HT / Q2 games) — failure here must NOT skip the today query
         try:
             data = await api_get("games", {"league": league_id, "season": season, "live": "all"})
             for g in (data.get("response") or []):
@@ -604,7 +623,9 @@ async def get_live_games():
                 else:
                     today_results.append(ng)
         except Exception:
-            continue
+            pass  # fall through to the today query below
+
+        # Today query — runs independently of live query result
         try:
             data2 = await api_get("games", {"league": league_id, "season": season, "date": today_str})
             for g in (data2.get("response") or []):
@@ -737,12 +758,14 @@ def _load_h2h_from_sheet() -> None:
         for row in rows:
             home = str(row.get("home", "")).strip()
             away = str(row.get("away", "")).strip()
-            ft_total = row.get("ft_total")
+            # Use the halftime total (Q1+Q2 combined) for H2H comparison —
+            # the engine compares h2h against the halftime bookie line.
+            ht_total = row.get("ht_total")
             game_key = f"{row.get('date', '')}-{home}-{away}"
             _seen_ft_ids.add(game_key)
-            if home and away and ft_total:
+            if home and away and ht_total:
                 key = _matchup_key(home, away)
-                _h2h_cache.setdefault(key, []).append(float(ft_total))
+                _h2h_cache.setdefault(key, []).append(float(ht_total))
         logging.info("Loaded %d matchups from Google Sheets", len(_h2h_cache))
     except Exception as e:
         logging.warning("Failed to load H2H from sheet: %s", e)
@@ -763,20 +786,26 @@ async def _extract_ft_games() -> None:
                     continue
                 ng = _normalize_game(g, league_id, name)
                 home, away = ng["home"], ng["away"]
+                ft_total = ng["total_home"] + ng["total_away"]
+                if ft_total == 0:
+                    continue  # skip games with incomplete score data
                 game_key = f"{today_str}-{home}-{away}"
                 if game_key in _seen_ft_ids:
                     continue
                 _seen_ft_ids.add(game_key)
-                ft_total = ng["total_home"] + ng["total_away"]
                 q2_total = ng["q2_home"] + ng["q2_away"]
+                # True halftime total = Q1 + Q2 (not the API's running total field)
+                ht_total_val = ng["q1_total"] + q2_total
                 new_rows.append([today_str, home, away, ng["league_name"],
-                                  ng["q1_total"], q2_total, ng["ht_total"], ft_total])
-                _h2h_cache.setdefault(_matchup_key(home, away), []).append(float(ft_total))
+                                  ng["q1_total"], q2_total, ht_total_val, ft_total])
+                # Cache halftime total — engine compares h2h against the halftime line
+                _h2h_cache.setdefault(_matchup_key(home, away), []).append(float(ht_total_val))
         except Exception as e:
             logging.warning("FT extraction failed for league %s: %s", league_id, e)
             continue
 
     if not new_rows:
+        logging.info("No new FT games to extract")
         return
     logging.info("Extracted %d new FT games", len(new_rows))
     ws = await asyncio.to_thread(_get_worksheet)
@@ -786,6 +815,9 @@ async def _extract_ft_games() -> None:
             logging.info("Wrote %d rows to Google Sheets", len(new_rows))
         except Exception as e:
             logging.warning("Failed to write to Google Sheets: %s", e)
+            # Reset cached worksheet so the connection is re-established next run
+            global _ws
+            _ws = None
 
 
 async def _scheduler_loop() -> None:
