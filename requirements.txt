@@ -3,3 +3,7 @@ httpx
 uvicorn
 gspread
 google-auth-oauthlib
+
+# Testing
+pytest
+pytest-asyncio
