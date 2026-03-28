@@ -957,6 +957,37 @@ async def reload_cache():
     return {"status": "ok", "hz_matchups": len(_h2h_cache), "ft_matchups": len(_ft_h2h_cache)}
 
 
+@app.get("/api/debug-sheets")
+async def debug_sheets():
+    """Diagnose Sheets connection — shows all tabs, row count, first 3 rows."""
+    if not (SHEETS_ID and CREDS_JSON):
+        return {"error": "SHEETS_ID or CREDS_JSON not configured"}
+    try:
+        import gspread
+        gc = gspread.service_account_from_dict(json.loads(CREDS_JSON))
+        sh = gc.open_by_key(SHEETS_ID)
+        all_tabs = [ws.title for ws in sh.worksheets()]
+        try:
+            ws = sh.worksheet(SHEETS_TAB)
+            rows = ws.get_all_records()
+            return {
+                "status": "ok",
+                "all_tabs": all_tabs,
+                "target_tab": SHEETS_TAB,
+                "total_rows": len(rows),
+                "first_3_rows": rows[:3],
+            }
+        except Exception as e:
+            return {
+                "status": "tab_error",
+                "all_tabs": all_tabs,
+                "target_tab": SHEETS_TAB,
+                "error": str(e),
+            }
+    except Exception as e:
+        return {"status": "connection_error", "error": str(e)}
+
+
 # ─── Demo data ────────────────────────────────────────────────────────────────
 
 def _demo_hz():
