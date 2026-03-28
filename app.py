@@ -775,10 +775,7 @@ def _get_worksheet():
             first_row = _ws.row_values(1)
             expected = ["date", "home", "away", "league", "q1_total", "q2_total", "ht_total", "ft_total"]
             if first_row != expected:
-                # Sheet exists but has wrong headers — clear and set correct ones
-                _ws.clear()
-                _ws.append_row(expected)
-                logging.info("Fixed sheet headers (were: %s)", first_row)
+                logging.warning("Sheet header mismatch: %s", first_row)
         except gspread.WorksheetNotFound:
             _ws = sh.add_worksheet(title=SHEETS_TAB, rows=2000, cols=10)
             _ws.append_row(["date", "home", "away", "league",
