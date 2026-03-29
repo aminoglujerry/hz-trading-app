@@ -98,6 +98,7 @@ Bei Bedarf manuell nachladen: `GET /api/reload-cache`
 | `GET /api/health` | Status: API Key, Sheets, Cache-Größen |
 | `GET /api/leagues` | Alle konfigurierten Ligen |
 | `GET /api/debug-stats/{game_id}` | Rohdaten der API-Sports Statistik-Antwort (Debug) |
+| `GET /api/debug-scan` | **Volldiagnostik**: alle Live-Spiele + H2H-Cache + Stats + Engine-Ergebnis (inkl. SKIP-Gründe) |
 | `GET /api/debug-sheets` | Sheets-Verbindung diagnostizieren |
 
 ### `/api/signal/hz` Parameter

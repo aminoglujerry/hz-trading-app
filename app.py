@@ -1905,10 +1905,79 @@ async function renderStats(){
       </div>
       <div class="backfill-progress" id="bfProgress"></div>
     </div>
+
+    <div class="stats-section">
+      <div class="stats-section-title">🔍 Signal Debug Scan</div>
+      <div style="font-size:10px;color:var(--dim2);margin-bottom:8px">
+        Zeigt alle Live-Spiele + H2H-Cache-Status + Stats + Engine-Ergebnis (inkl. SKIP-Gründe)
+      </div>
+      <div class="backfill-row">
+        <button class="stats-action-btn" id="debugScanBtn" onclick="runDebugScan()">🔍 Scan ausführen</button>
+      </div>
+      <div id="debugScanOut" style="margin-top:8px;font-size:10px;line-height:1.5;word-break:break-word"></div>
+    </div>
   `;
 }
 
-// ── Backfill ──
+// ── Debug Scan ──
+async function runDebugScan(){
+  const out=document.getElementById('debugScanOut');
+  const btn=document.getElementById('debugScanBtn');
+  if(!out||!btn)return;
+  out.textContent='⟳ Lade…';
+  btn.disabled=true;
+  try{
+    const d=await fetch('/api/debug-scan').then(r=>r.json());
+    if(d.error){out.innerHTML=`<span style="color:var(--over)">✗ ${d.error}</span>`;return;}
+    const cfg=d.config||{};
+    let html=`<div style="color:var(--dim2);margin-bottom:6px">`;
+    html+=`API-Key: ${cfg.api_key_set?'<span style="color:var(--green)">✓</span>':'<span style="color:var(--over)">✗</span>'}  `;
+    html+=`HZ-Cache: <b>${cfg.hz_matchups_cached||0}</b>  FT-Cache: <b>${cfg.ft_matchups_cached||0}</b>  `;
+    html+=`H2H-Min: <b>${cfg.h2h_min_samples||3}</b>  AutoScan-Stufe: <b>${cfg.auto_scan_stufe||'A'}</b></div>`;
+
+    const renderGroup=(list,label)=>{
+      if(!list||!list.length)return`<div style="color:var(--dim2);margin-bottom:4px"><b>${label}:</b> keine Spiele</div>`;
+      let s=`<div style="margin-bottom:8px"><b>${label} (${list.length})</b></div>`;
+      for(const e of list){
+        const g=e.game||{};
+        const h=e.h2h||{};
+        const st=e.stats||{};
+        const sig=e.signal||{};
+        const reason=e.skip_reason||'';
+
+        const sigColor=sig.dir==='UNDER'?'var(--under)':sig.dir==='OVER'?'var(--over)':'var(--dim2)';
+        const sigTxt=sig.dir?`<span style="color:${sigColor}">${sig.dir}</span> ST-${sig.stufe||'?'} buf=${sig.buffer!=null?(sig.buffer>=0?'+':'')+sig.buffer.toFixed(1):'?'}`:'—';
+
+        s+=`<div style="border:1px solid var(--border2);border-radius:4px;padding:6px 8px;margin-bottom:6px">`;
+        s+=`<div style="font-size:11px;font-weight:600;margin-bottom:3px">${g.home||'?'} vs ${g.away||'?'} <span style="color:var(--dim2);font-weight:400">${g.league_name||''}</span></div>`;
+        s+=`<div style="display:flex;flex-wrap:wrap;gap:10px;font-size:9px;color:var(--dim2)">`;
+        s+=`<span>Status: <b style="color:var(--text)">${g.status||'?'}</b>${g.timer!=null?' Q2 '+g.timer+'min':''}</span>`;
+        s+=`<span>Q1: <b>${g.q1_total||0}</b> Q2: <b>${g.q2_live||0}</b> HT: <b>${g.ht_total||0}</b></span>`;
+        s+=`<span>H2H: <b style="color:${h.found?'var(--text)':'var(--over)'}">${h.found?h.avg+' ('+h.count+'x)':'fehlt ('+h.count+'/'+cfg.h2h_min_samples+')'}</b></span>`;
+        s+=`<span>Fouls: <b>${st.found?st.total_fouls||0:'—'}</b> FT%: <b>${st.found&&st.avg_ft_pct!=null?st.avg_ft_pct+'%':'—'}</b> FG%: <b>${st.found&&st.avg_fg_pct!=null?st.avg_fg_pct+'%':'—'}</b></span>`;
+        s+=`<span>Signal: <b>${sigTxt}</b></span>`;
+        if(sig.reasons&&sig.reasons.length)s+=`<span style="color:var(--dim2)">→ ${sig.reasons.join(' · ')}</span>`;
+        if(reason)s+=`<span style="color:var(--gold)">⚠ ${reason}</span>`;
+        s+=`</div></div>`;
+      }
+      return s;
+    };
+
+    html+=renderGroup(d.hz_games,'HZ · Halbzeit / Q2');
+    html+=renderGroup(d.q3_games,'FT · Q3 Break');
+    if(d.other_live&&d.other_live.length){
+      let s=`<div style="margin-bottom:6px"><b>Andere Live-Spiele (${d.other_live.length})</b></div>`;
+      for(const g of d.other_live)
+        s+=`<div style="font-size:9px;color:var(--dim2);margin-bottom:2px">${g.home||'?'} vs ${g.away||'?'} — ${g.status||'?'} (${g.league_name||''})</div>`;
+      html+=s;
+    }
+    out.innerHTML=html;
+  }catch(e){
+    out.innerHTML=`<span style="color:var(--over)">✗ ${e.message}</span>`;
+  }finally{
+    btn.disabled=false;
+  }
+}
 async function startBackfill(){
   const days=parseInt(document.getElementById('bfDays')?.value)||7;
   const offset=parseInt(document.getElementById('bfOffset')?.value)||0;
@@ -2556,22 +2625,50 @@ async def _auto_scan_once() -> int:
                 seen_ids.add(g["id"])
                 q3_games.append(g)
 
+    log.info(
+        "🤖 Auto-scan — HZ:%d  Q3:%d  (hz_cache:%d  ft_cache:%d)",
+        len(hz_games), len(q3_games), len(_h2h_cache), len(_ft_h2h_cache),
+    )
+
     sent_count = 0
 
     for g, sig_type in [(g, "hz") for g in hz_games] + [(g, "ft") for g in q3_games]:
         dedup_key = (g["id"], sig_type)
         if now - _auto_sent.get(dedup_key, 0) < AUTO_SENT_TTL:
+            log.debug(
+                "🤖 skip dedup — %s vs %s (%s)",
+                g["home"], g["away"], sig_type,
+            )
             continue
 
         try:
             sig = await _auto_signal_for_game(g, sig_type)
         except Exception as e:
-            log.debug("auto-signal %s %s vs %s: %s", sig_type, g["home"], g["away"], e)
+            log.warning("auto-signal %s %s vs %s: %s", sig_type, g["home"], g["away"], e)
             continue
 
-        if sig is None or sig["dir"] == "SKIP":
+        if sig is None:
+            key  = _matchup_key(g["home"], g["away"])
+            vals = (_h2h_cache if sig_type == "hz" else _ft_h2h_cache).get(key, [])
+            log.info(
+                "🤖 no signal (h2h insufficient %d/%d) — %s vs %s (%s)",
+                len(vals), H2H_MIN_SAMPLES, g["home"], g["away"], sig_type,
+            )
             continue
+
+        if sig["dir"] == "SKIP":
+            log.info(
+                "🤖 SKIP — %s vs %s (%s) buf=%.1f reasons=%s",
+                g["home"], g["away"], sig_type,
+                sig.get("buffer", 0), "; ".join(sig.get("reasons", [])),
+            )
+            continue
+
         if AUTO_SCAN_STUFE == "A" and sig["stufe"] != "A":
+            log.info(
+                "🤖 stufe filter — %s vs %s (%s) dir=%s stufe=%s",
+                g["home"], g["away"], sig_type, sig["dir"], sig["stufe"],
+            )
             continue
 
         league = g.get("league_name", "")
@@ -2610,9 +2707,9 @@ async def _auto_scan_loop() -> None:
         try:
             sent = await _auto_scan_once()
             if sent:
-                log.info("🤖 Auto-scan cycle — %d signal(s) sent", sent)
+                log.info("🤖 Auto-scan cycle complete — %d signal(s) sent", sent)
             else:
-                log.debug("🤖 Auto-scan cycle — no signals")
+                log.info("🤖 Auto-scan cycle complete — no signals sent")
         except Exception as e:
             log.warning("Auto-scan loop error: %s", e)
         await asyncio.sleep(AUTO_SCAN_INTERVAL)
@@ -3200,6 +3297,168 @@ async def debug_stats(game_id: int):
         }
     except Exception as e:
         return {"error": str(e)}
+
+
+@app.get("/api/debug-scan")
+async def debug_scan():
+    """
+    Full diagnostic scan: shows every live game, its H2H cache status, live stats,
+    and the complete signal engine result (including SKIP reasons) for each game.
+    Use this to understand why the auto-scan is or is not generating signals.
+    """
+    if not API_KEY:
+        return {
+            "error":      "API_SPORTS_KEY not set",
+            "hz_games":   [],
+            "q3_games":   [],
+            "other_live": [],
+            "config":     {"api_key_set": False},
+        }
+
+    results = await asyncio.gather(
+        *[_fetch_live_for_league(lid, name, season)
+          for lid, (name, season) in LEAGUES.items()],
+        return_exceptions=True,
+    )
+
+    hz_games:   list = []
+    q3_games:   list = []
+    other_live: list = []
+    seen_ids:   set  = set()
+
+    for r in results:
+        if not isinstance(r, tuple):
+            continue
+        hz, q3, others = r
+        for g in hz:
+            if g["id"] not in seen_ids:
+                seen_ids.add(g["id"])
+                hz_games.append(g)
+        for g in q3:
+            if g["id"] not in seen_ids:
+                seen_ids.add(g["id"])
+                q3_games.append(g)
+        for g in others:
+            if g["id"] not in seen_ids:
+                seen_ids.add(g["id"])
+                other_live.append(g)
+
+    now = time()
+
+    async def _enrich_hz(g: dict) -> dict:
+        key      = _matchup_key(g["home"], g["away"])
+        vals     = _h2h_cache.get(key, [])
+        avg      = round(sum(vals) / len(vals), 1) if vals else None
+        h2h_info = {
+            "found":  avg is not None,
+            "count":  len(vals),
+            "avg":    avg,
+            "vals":   vals[-10:],
+        }
+
+        stats_info = await get_game_stats(g["id"])
+
+        signal      = None
+        skip_reason = None
+        if len(vals) < H2H_MIN_SAMPLES:
+            skip_reason = f"h2h_insufficient ({len(vals)}/{H2H_MIN_SAMPLES} samples needed)"
+        else:
+            fouls  = stats_info.get("total_fouls", 0) if stats_info.get("found") else 0
+            ft_pct = stats_info.get("avg_ft_pct")     if stats_info.get("found") else None
+            fg_pct = stats_info.get("avg_fg_pct")     if stats_info.get("found") else None
+            is_ht  = g.get("status") == "HT"
+            timer  = float(g.get("timer") or 0)
+            signal = _hz_engine(
+                h2h=avg, line=avg,
+                q1=float(g.get("q1_total", 0)),
+                q2=float(g.get("q2_live", 0)),
+                timer=timer, fouls=fouls, ft_pct=ft_pct, fg_pct=fg_pct,
+                line_drop=False, line_rise=False, is_ht=is_ht,
+            )
+            if signal and signal["dir"] != "SKIP":
+                dedup_key = (g["id"], "hz")
+                secs_ago  = int(now - _auto_sent.get(dedup_key, 0))
+                if secs_ago < AUTO_SENT_TTL:
+                    skip_reason = f"dedup_ttl (sent {secs_ago}s ago, ttl={AUTO_SENT_TTL}s)"
+                elif AUTO_SCAN_STUFE == "A" and signal["stufe"] != "A":
+                    skip_reason = f"stufe_filtered (signal={signal['stufe']}, required={AUTO_SCAN_STUFE})"
+
+        return {
+            "game":        g,
+            "h2h":         h2h_info,
+            "stats":       stats_info,
+            "signal":      signal,
+            "skip_reason": skip_reason,
+        }
+
+    async def _enrich_q3(g: dict) -> dict:
+        key      = _matchup_key(g["home"], g["away"])
+        vals     = _ft_h2h_cache.get(key, [])
+        avg      = round(sum(vals) / len(vals), 1) if vals else None
+        h2h_info = {
+            "found": avg is not None,
+            "count": len(vals),
+            "avg":   avg,
+            "vals":  vals[-10:],
+        }
+
+        stats_info = await get_game_stats(g["id"])
+
+        signal      = None
+        skip_reason = None
+        if len(vals) < H2H_MIN_SAMPLES:
+            skip_reason = f"h2h_insufficient ({len(vals)}/{H2H_MIN_SAMPLES} samples needed)"
+        else:
+            fouls   = stats_info.get("total_fouls", 0) if stats_info.get("found") else 0
+            home_ft = stats_info.get("home_ft_pct")    if stats_info.get("found") else None
+            away_ft = stats_info.get("away_ft_pct")    if stats_info.get("found") else None
+            signal  = _ft_engine(
+                h2h=avg, line=avg,
+                q3h=float(g.get("q3_home", 0)),
+                q3a=float(g.get("q3_away", 0)),
+                hz=float(g.get("ht_total", 0)),
+                fouls=fouls, ft_pct_h=home_ft, ft_pct_a=away_ft,
+            )
+            if signal and signal["dir"] != "SKIP":
+                dedup_key = (g["id"], "ft")
+                secs_ago  = int(now - _auto_sent.get(dedup_key, 0))
+                if secs_ago < AUTO_SENT_TTL:
+                    skip_reason = f"dedup_ttl (sent {secs_ago}s ago, ttl={AUTO_SENT_TTL}s)"
+                elif AUTO_SCAN_STUFE == "A" and signal["stufe"] != "A":
+                    skip_reason = f"stufe_filtered (signal={signal['stufe']}, required={AUTO_SCAN_STUFE})"
+
+        return {
+            "game":        g,
+            "h2h":         h2h_info,
+            "stats":       stats_info,
+            "signal":      signal,
+            "skip_reason": skip_reason,
+        }
+
+    enriched_hz = list(await asyncio.gather(*[_enrich_hz(g) for g in hz_games]))
+    enriched_q3 = list(await asyncio.gather(*[_enrich_q3(g) for g in q3_games]))
+
+    log.info(
+        "🔍 Debug-scan — HZ:%d  Q3:%d  other:%d",
+        len(hz_games), len(q3_games), len(other_live),
+    )
+
+    return {
+        "config": {
+            "api_key_set":        bool(API_KEY),
+            "h2h_min_samples":    H2H_MIN_SAMPLES,
+            "auto_scan_stufe":    AUTO_SCAN_STUFE,
+            "auto_scan_interval": AUTO_SCAN_INTERVAL,
+            "hz_matchups_cached": len(_h2h_cache),
+            "ft_matchups_cached": len(_ft_h2h_cache),
+        },
+        "hz_games":    enriched_hz,
+        "q3_games":    enriched_q3,
+        "other_live":  other_live,
+        "total_hz":    len(hz_games),
+        "total_q3":    len(q3_games),
+        "total_other": len(other_live),
+    }
 
 
 @app.get("/api/debug-sheets")
