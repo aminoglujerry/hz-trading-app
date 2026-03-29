@@ -867,3 +867,30 @@ class TestAutoScanEndpoint:
     def test_h2h_min_matches_constant(self, client):
         r = client.get("/api/auto-scan")
         assert r.json()["h2h_min"] == H2H_MIN_SAMPLES
+
+
+class TestOddsEndpoint:
+    def test_returns_not_found_when_no_key(self, client):
+        # ODDS_API_KEY is not set in test env → should return found=False
+        r = client.get("/api/odds?home=TeamA&away=TeamB")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["found"] is False
+        assert "reason" in data
+
+    def test_requires_home_and_away(self, client):
+        r = client.get("/api/odds?home=TeamA")
+        assert r.status_code == 422
+
+
+class TestLiveEndpointNoKey:
+    def test_returns_empty_lists_when_no_api_key(self, client):
+        # No API_KEY in test env → returns empty lists with source=no_key
+        r = client.get("/api/live")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["games"] == []
+        assert data["today"] == []
+        assert data["q3"] == []
+        assert data["source"] == "no_key"
+        assert data["count"] == 0
