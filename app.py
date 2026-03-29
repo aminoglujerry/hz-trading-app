@@ -635,6 +635,164 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;}
   font-size:10px;color:var(--gold);letter-spacing:.5px;
   margin-top:6px;min-height:16px;
 }
+
+/* ── Nav tabs in topbar ── */
+.topbar-tabs{display:flex;gap:0;margin:0 4px;}
+.tab-btn{
+  background:none;border:none;border-bottom:2px solid transparent;
+  color:var(--dim2);font-family:'Barlow',sans-serif;
+  font-size:10px;letter-spacing:2px;text-transform:uppercase;
+  padding:0 12px;height:var(--topbar-h);cursor:pointer;transition:all .15s;
+}
+.tab-btn:hover{color:var(--text);}
+.tab-btn.active{color:var(--white);border-bottom-color:var(--green);}
+
+/* ── Scores View (Flashscore-style) ── */
+.scores-view{
+  display:none;
+  height:100vh;
+  padding-top:calc(var(--topbar-h) + var(--statusbar-h));
+  overflow-y:auto;
+  scrollbar-width:thin;scrollbar-color:var(--border2) transparent;
+}
+.scores-view::-webkit-scrollbar{width:4px;}
+.scores-view::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
+.scores-view.active{display:block;}
+
+.scores-toolbar{
+  position:sticky;top:0;z-index:10;
+  background:var(--s3);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:10px;padding:7px 16px;
+}
+.scores-toolbar-title{
+  font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--text);font-weight:600;
+}
+.scores-refresh-btn{
+  background:none;border:1px solid var(--border2);color:var(--dim2);
+  font-size:9px;letter-spacing:1px;padding:3px 10px;cursor:pointer;
+  font-family:'Barlow',sans-serif;text-transform:uppercase;transition:all .15s;
+}
+.scores-refresh-btn:hover{border-color:var(--green);color:var(--green);}
+.scores-last-update{font-size:9px;color:var(--dim);letter-spacing:.5px;}
+.scores-total{font-size:9px;color:var(--dim2);letter-spacing:.5px;margin-left:auto;}
+
+.scores-league{border-bottom:2px solid var(--border);}
+.scores-league-header{
+  display:flex;align-items:center;gap:8px;
+  padding:6px 14px;cursor:pointer;background:var(--s1);
+  border-bottom:1px solid var(--border);user-select:none;transition:background .12s;
+}
+.scores-league-header:hover{background:var(--s2);}
+.scores-league-name{
+  font-family:'Barlow Condensed',sans-serif;font-weight:700;
+  font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text);
+}
+.scores-live-badge{
+  font-size:8px;font-weight:700;letter-spacing:1px;padding:1px 6px;
+  background:rgba(45,198,83,.15);border:1px solid rgba(45,198,83,.35);color:var(--green);
+}
+.scores-league-count{font-size:9px;color:var(--dim2);margin-left:auto;}
+.scores-league-chevron{font-size:9px;color:var(--dim);transition:transform .15s;margin-left:4px;}
+.scores-league.collapsed .scores-league-chevron{transform:rotate(-90deg);}
+.scores-league.collapsed .scores-games-wrap{display:none;}
+.scores-games-wrap{display:flex;flex-direction:column;}
+
+.score-row{
+  display:grid;
+  grid-template-columns:58px 1fr 170px 1fr 90px;
+  align-items:center;
+  border-bottom:1px solid var(--border);
+  cursor:pointer;transition:background .1s;min-height:38px;
+}
+.score-row:hover{background:var(--s2);}
+.score-row.expanded{background:var(--s2);border-bottom-color:transparent;}
+
+.sr-status{
+  padding:5px 6px;text-align:center;
+  font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;
+  letter-spacing:.5px;color:var(--dim2);
+  border-right:1px solid var(--border);
+  align-self:stretch;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+}
+.sr-status.live{color:var(--green);}
+.sr-status.ht{color:var(--gold);}
+.sr-status.ns{color:var(--dim);}
+.sr-timer{font-size:9px;margin-top:1px;opacity:.8;}
+
+.sr-home,.sr-away{
+  padding:6px 10px;
+  font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;
+  color:var(--white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.sr-away{text-align:right;}
+
+.sr-scores{
+  text-align:center;padding:4px 6px;
+  border-left:1px solid var(--border);border-right:1px solid var(--border);
+}
+.sr-total{
+  font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:900;
+  color:var(--white);letter-spacing:1px;line-height:1.1;
+}
+.sr-qs{
+  display:flex;justify-content:center;gap:8px;margin-top:2px;
+}
+.sr-q{display:flex;flex-direction:column;align-items:center;gap:1px;}
+.sr-q-lbl{font-size:7px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;}
+.sr-q-val{font-size:9px;color:var(--dim2);}
+.sr-q-val.active{color:var(--text);}
+
+.sr-badge{
+  padding:5px 8px;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;border-left:1px solid var(--border);align-self:stretch;
+  gap:2px;
+}
+.sr-h2h{font-size:8px;color:var(--dim2);letter-spacing:.3px;}
+.sr-h2h.found{color:var(--green);}
+.sr-sig{
+  font-size:8px;font-weight:700;letter-spacing:1px;padding:1px 5px;border:1px solid;
+}
+.sr-sig.under{color:var(--under);border-color:rgba(0,180,216,.35);}
+.sr-sig.over{color:var(--over);border-color:rgba(230,57,70,.35);}
+
+.score-detail{
+  display:none;padding:12px 14px 14px;
+  background:var(--s3);border-bottom:1px solid var(--border);
+  border-top:1px solid var(--border);
+}
+.score-detail.open{display:block;}
+.sd-grid{
+  display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:8px;
+}
+@media(max-width:600px){.sd-grid{grid-template-columns:1fr;}}
+.sd-section{
+  background:var(--bg);border:1px solid var(--border);padding:8px 10px;
+}
+.sd-title{
+  font-size:8px;letter-spacing:1.5px;text-transform:uppercase;
+  color:var(--dim2);margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--border);
+}
+.sd-row{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:3px 0;border-bottom:1px solid var(--border);font-size:10px;
+}
+.sd-row:last-child{border-bottom:none;}
+.sd-lbl{color:var(--dim2);}
+.sd-val{
+  font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:13px;color:var(--text);
+}
+.sd-val.good{color:var(--green);}
+.sd-val.warn{color:var(--gold);}
+.sd-val.bad{color:var(--over);}
+.sd-loading{font-size:10px;color:var(--dim2);padding:6px 0;letter-spacing:.5px;}
+.sd-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;}
+.sd-btn{
+  background:none;border:1px solid var(--border2);color:var(--dim2);
+  font-size:9px;letter-spacing:1px;padding:4px 12px;cursor:pointer;
+  font-family:'Barlow',sans-serif;text-transform:uppercase;transition:all .15s;
+}
+.sd-btn:hover,.sd-btn.primary{border-color:var(--under);color:var(--under);}
 </style>
 </head>
 <body>
@@ -642,6 +800,11 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;}
 <!-- Topbar -->
 <div class="topbar">
   <div class="logo">HZ / <em>FT</em></div>
+  <div class="topbar-divider"></div>
+  <div class="topbar-tabs">
+    <button class="tab-btn active" id="tabSignal" onclick="showTab('signal')">SIGNAL</button>
+    <button class="tab-btn" id="tabScores" onclick="showTab('scores')">SCORES</button>
+  </div>
   <div class="topbar-divider"></div>
   <div class="live-count"><span id="liveCountNum">0</span> LIVE</div>
   <div class="topbar-spacer"></div>
@@ -773,6 +936,21 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;}
 
   </div><!-- /right-panel -->
 </div><!-- /app-shell -->
+
+<!-- Scores View (Flashscore-like) -->
+<div class="scores-view" id="scoresView">
+  <div class="scores-toolbar">
+    <span class="scores-toolbar-title">🏀 Scores</span>
+    <button class="scores-refresh-btn" id="scoresRefreshBtn" onclick="loadScores()">⟳ Refresh</button>
+    <span class="scores-last-update" id="scoresLastUpdate"></span>
+    <span class="scores-total" id="scoresTotalBadge"></span>
+  </div>
+  <div id="scoresBody">
+    <div class="empty" style="padding:40px;font-size:11px;">
+      ⟳ Klicke auf SCORES um Ergebnisse zu laden
+    </div>
+  </div>
+</div>
 
 <!-- Stats Modal -->
 <div class="stats-overlay" id="statsOverlay" onclick="if(event.target===this)toggleStats()">
@@ -2022,6 +2200,269 @@ document.addEventListener('DOMContentLoaded',()=>{
   _updateNotifBtn();
   _updateSoundBtn();
 });
+
+// ── Scores View (Flashscore-like) ────────────────────────────────────────────
+let _scoresData      = null;
+let _scoresAutoTimer = null;
+const SCORES_REFRESH_MS = 30000;
+
+function showTab(tab){
+  const isSignal = tab === 'signal';
+  document.getElementById('tabSignal').classList.toggle('active', isSignal);
+  document.getElementById('tabScores').classList.toggle('active', !isSignal);
+  const shell  = document.querySelector('.app-shell');
+  const scores = document.getElementById('scoresView');
+  if(isSignal){
+    shell.style.display  = '';
+    scores.classList.remove('active');
+    if(_scoresAutoTimer){ clearInterval(_scoresAutoTimer); _scoresAutoTimer = null; }
+  } else {
+    shell.style.display  = 'none';
+    scores.classList.add('active');
+    if(!_scoresData) loadScores();
+    if(!_scoresAutoTimer)
+      _scoresAutoTimer = setInterval(()=>loadScores(true), SCORES_REFRESH_MS);
+  }
+}
+
+async function loadScores(silent=false){
+  const btn = document.getElementById('scoresRefreshBtn');
+  if(!silent && btn){ btn.textContent = '...'; btn.disabled = true; }
+  try{
+    const d = await fetch('/api/scores').then(r=>r.json());
+    _scoresData = d;
+    renderScores(d);
+    const now = new Date();
+    const t = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+    const lu = document.getElementById('scoresLastUpdate');
+    if(lu) lu.textContent = 'Stand: '+t;
+    const tot = document.getElementById('scoresTotalBadge');
+    if(tot) tot.textContent = (d.total||0)+' Spiele';
+  } catch(e){
+    if(!silent)
+      document.getElementById('scoresBody').innerHTML =
+        '<div class="empty" style="padding:40px;">Fehler beim Laden der Scores</div>';
+  } finally {
+    if(btn){ btn.textContent = '⟳ Refresh'; btn.disabled = false; }
+  }
+}
+
+function renderScores(d){
+  const body = document.getElementById('scoresBody');
+  if(!d.leagues || !d.leagues.length){
+    body.innerHTML = '<div class="empty" style="padding:40px;font-size:11px;">Keine Spiele verfügbar — API-Schlüssel prüfen</div>';
+    return;
+  }
+  body.innerHTML = d.leagues.map(l => _renderScoresLeague(l)).join('');
+}
+
+function _renderScoresLeague(l){
+  const liveBadge = l.live_count > 0
+    ? `<span class="scores-live-badge">${l.live_count} LIVE</span>` : '';
+  const games = l.games.map(g => _renderScoreRow(g)).join('');
+  return `<div class="scores-league" id="sl-${l.id}">
+    <div class="scores-league-header" onclick="toggleLeague(${l.id})">
+      <span class="scores-league-name">🏀 ${l.name}</span>
+      ${liveBadge}
+      <span class="scores-league-count">${l.games.length} Spiele</span>
+      <span class="scores-league-chevron">›</span>
+    </div>
+    <div class="scores-games-wrap">${games}</div>
+  </div>`;
+}
+
+function _srStatusHtml(g){
+  const st  = g.status || '—';
+  const live= ['Q1','Q2','Q3','Q4','OT','HT','BT','Q3BT'].includes(st);
+  const cls = st === 'HT' ? 'ht' : live ? 'live' : 'ns';
+  const timer= g.timer ? `<span class="sr-timer">${g.timer}'</span>` : '';
+  return `<div class="sr-status ${cls}">${st}${timer}</div>`;
+}
+
+function _srScoresHtml(g){
+  const hasQ  = g.q1_home || g.q2_home || g.q3_home || g.total_home;
+  if(!hasQ){
+    return `<div class="sr-scores">
+      <div class="sr-total" style="font-size:14px;color:var(--dim)">vs</div>
+    </div>`;
+  }
+  const th = g.total_home || 0, ta = g.total_away || 0;
+  const st = g.status || '';
+  const qs = [
+    {l:'Q1', h:g.q1_home||0, a:g.q1_away||0, act:st==='Q1'},
+    {l:'Q2', h:g.q2_home||0, a:g.q2_away||0, act:['Q2','HT','BT'].includes(st)},
+    {l:'Q3', h:g.q3_home||0, a:g.q3_away||0, act:['Q3','Q3BT'].includes(st)},
+  ].filter(q => q.h || q.a || q.act);
+  const qHtml = qs.map(q =>
+    `<div class="sr-q">
+      <span class="sr-q-lbl">${q.l}</span>
+      <span class="sr-q-val ${q.act?'active':''}">${q.h}-${q.a}</span>
+    </div>`).join('');
+  return `<div class="sr-scores">
+    <div class="sr-total">${th} - ${ta}</div>
+    <div class="sr-qs">${qHtml}</div>
+  </div>`;
+}
+
+function _srBadgeHtml(g){
+  const cnt = g.h2h_count || 0;
+  const avg = g.h2h_avg_hz;
+  const cls = cnt >= 3 ? 'found' : '';
+  const label = avg != null ? `Ø${avg}` : '—';
+  return `<div class="sr-badge">
+    <span class="sr-h2h ${cls}">H2H: ${label}</span>
+    <span class="sr-h2h" style="color:var(--dim)">${cnt} Eintr.</span>
+  </div>`;
+}
+
+function _renderScoreRow(g){
+  const id = g.id;
+  const he = encodeURIComponent(g.home);
+  const ae = encodeURIComponent(g.away);
+  return `<div class="score-row" id="sr-${id}" onclick="toggleScoreDetail(${id},'${he}','${ae}')">
+    ${_srStatusHtml(g)}
+    <div class="sr-home">${g.home}</div>
+    ${_srScoresHtml(g)}
+    <div class="sr-away">${g.away}</div>
+    ${_srBadgeHtml(g)}
+  </div>
+  <div class="score-detail" id="sd-${id}"></div>`;
+}
+
+function toggleLeague(lid){
+  const el = document.getElementById('sl-'+lid);
+  if(el) el.classList.toggle('collapsed');
+}
+
+const _loadedDetails = {};
+async function toggleScoreDetail(id, homeEnc, awayEnc){
+  const row = document.getElementById('sr-'+id);
+  const det = document.getElementById('sd-'+id);
+  if(!row || !det) return;
+  if(det.classList.contains('open')){
+    det.classList.remove('open');
+    row.classList.remove('expanded');
+    return;
+  }
+  row.classList.add('expanded');
+  det.classList.add('open');
+  if(_loadedDetails[id]){ det.innerHTML = _loadedDetails[id]; return; }
+  det.innerHTML = '<div class="sd-loading">Lade Statistiken…</div>';
+  const home = decodeURIComponent(homeEnc);
+  const away = decodeURIComponent(awayEnc);
+  try{
+    const [statsRes, h2hRes] = await Promise.allSettled([
+      fetch(`/api/game-stats/${id}`).then(r=>r.json()),
+      fetch(`/api/h2h?home=${homeEnc}&away=${awayEnc}`).then(r=>r.json()),
+    ]);
+    const stats = statsRes.status === 'fulfilled' ? statsRes.value : {found:false};
+    const h2h   = h2hRes.status  === 'fulfilled' ? h2hRes.value  : {avg:null,count:0};
+    const html  = _renderScoreDetail(id, stats, h2h, home, away, homeEnc, awayEnc);
+    _loadedDetails[id] = html;
+    det.innerHTML = html;
+  } catch(e){
+    det.innerHTML = '<div class="sd-loading">Fehler beim Laden der Statistiken</div>';
+  }
+}
+
+function _renderScoreDetail(id, stats, h2h, home, away, homeEnc, awayEnc){
+  // Live Stats section
+  let liveRows = '<div class="sd-row"><span class="sd-lbl">Keine Live-Stats verfügbar</span></div>';
+  if(stats.found){
+    const fouls = stats.total_fouls ?? '—';
+    const ftPct = stats.avg_ft_pct  ?? '—';
+    const fgPct = stats.avg_fg_pct  ?? '—';
+    const foulsCls = (fouls !== '—' && fouls >= 8) ? 'warn' : '';
+    const ftCls    = (ftPct !== '—' && ftPct >= 85) ? 'good' : (ftPct !== '—' && ftPct < 75) ? 'warn' : '';
+    const fgCls    = (fgPct !== '—' && fgPct >= 60) ? 'bad'  : '';
+    const teamRows = (stats.teams || []).map(t =>
+      `<div class="sd-row">
+        <span class="sd-lbl">${t.name||'Team'}</span>
+        <span class="sd-val" style="font-size:10px;">FT:${t.ft_pct??'—'}% · FG:${t.fg_pct??'—'}% · F:${t.fouls??0}</span>
+      </div>`).join('');
+    liveRows = `<div class="sd-row">
+        <span class="sd-lbl">Fouls gesamt</span>
+        <span class="sd-val ${foulsCls}">${fouls}</span>
+      </div>
+      <div class="sd-row">
+        <span class="sd-lbl">FT% Ø</span>
+        <span class="sd-val ${ftCls}">${ftPct}${ftPct!=='—'?'%':''}</span>
+      </div>
+      <div class="sd-row">
+        <span class="sd-lbl">FG% Ø</span>
+        <span class="sd-val ${fgCls}">${fgPct}${fgPct!=='—'?'%':''}</span>
+      </div>${teamRows}`;
+  }
+
+  // H2H section
+  const h2hAvg = h2h.avg   ?? '—';
+  const h2hCnt = h2h.count ?? 0;
+  const h2hCls = h2hCnt >= 5 ? 'good' : h2hCnt >= 3 ? '' : 'warn';
+
+  // FT H2H (from scores data if available)
+  let h2hFtRow = '';
+  const g = (_scoresData?.leagues||[]).flatMap(l=>l.games).find(x=>x.id===id);
+  if(g?.h2h_avg_ft != null){
+    const ftCnt = g.h2h_count_ft || 0;
+    const ftCls = ftCnt >= 5 ? 'good' : ftCnt >= 3 ? '' : 'warn';
+    h2hFtRow = `<div class="sd-row">
+      <span class="sd-lbl">H2H Ø FT</span>
+      <span class="sd-val ${ftCls}">${g.h2h_avg_ft} (${ftCnt})</span>
+    </div>`;
+  }
+
+  return `<div class="sd-grid">
+    <div class="sd-section">
+      <div class="sd-title">📊 Live Stats</div>
+      ${liveRows}
+    </div>
+    <div class="sd-section">
+      <div class="sd-title">📈 H2H Verlauf</div>
+      <div class="sd-row">
+        <span class="sd-lbl">H2H Ø HZ</span>
+        <span class="sd-val ${h2hCls}">${h2hAvg}${h2hAvg!=='—'?' pts':''}</span>
+      </div>
+      <div class="sd-row">
+        <span class="sd-lbl">Einträge HZ</span>
+        <span class="sd-val ${h2hCls}">${h2hCnt}</span>
+      </div>
+      ${h2hFtRow}
+    </div>
+    <div class="sd-section">
+      <div class="sd-title">⚡ Signal Engine</div>
+      <div class="sd-row">
+        <span class="sd-lbl">Heim</span>
+        <span class="sd-val" style="font-size:10px;">${home}</span>
+      </div>
+      <div class="sd-row">
+        <span class="sd-lbl">Gast</span>
+        <span class="sd-val" style="font-size:10px;">${away}</span>
+      </div>
+      <div class="sd-row">
+        <span class="sd-lbl">H2H Status</span>
+        <span class="sd-val ${h2hCls}">${h2hCnt>=3?'✓ Genug':'✗ Zu wenig'}</span>
+      </div>
+    </div>
+  </div>
+  <div class="sd-actions">
+    <button class="sd-btn primary"
+      onclick="event.stopPropagation();_scoresGoToSignal(${id},'${homeEnc}','${awayEnc}')">
+      ▶ Signal berechnen
+    </button>
+  </div>`;
+}
+
+async function _scoresGoToSignal(id, homeEnc, awayEnc){
+  showTab('signal');
+  await loadLive();
+  const card = document.getElementById('gc-'+id);
+  if(card){
+    const home = decodeURIComponent(homeEnc);
+    const away = decodeURIComponent(awayEnc);
+    selectHzCard(id, home, away);
+    card.scrollIntoView({behavior:'smooth', block:'center'});
+  }
+}
 </script>
 </body>
 </html>"""
@@ -3562,6 +4003,97 @@ async def debug_sheets():
             }
     except Exception as e:
         return {"status": "connection_error", "error": str(e)}
+
+
+@app.get("/api/scores")
+async def get_scores():
+    """
+    All live + today games grouped by league — for the Flashscore-like scores view.
+    Leagues with live games appear first, then alphabetically by name.
+    Each game is annotated with H2H cache stats (count + average).
+    """
+    if not API_KEY:
+        return {"leagues": [], "source": "no_key", "total": 0}
+
+    today_str    = _date.today().isoformat()
+    league_items = list(LEAGUES.items())
+
+    # Fetch all live games concurrently
+    live_results = await asyncio.gather(
+        *[_fetch_live_for_league(lid, name, season)
+          for lid, (name, season) in league_items],
+        return_exceptions=True,
+    )
+
+    by_league: dict[int, dict] = {}
+    seen_ids:  set             = set()
+
+    for i, (lid, (name, _)) in enumerate(league_items):
+        r = live_results[i] if i < len(live_results) else None
+        if not isinstance(r, tuple):
+            continue
+        hz, q3, others = r
+        live_games = [
+            *[{**g, "_sig_type": "hz"}    for g in hz],
+            *[{**g, "_sig_type": "ft"}    for g in q3],
+            *[{**g, "_sig_type": "other"} for g in others],
+        ]
+        for g in live_games:
+            gid = g["id"]
+            if gid not in seen_ids:
+                seen_ids.add(gid)
+                g["_live"] = True
+                if lid not in by_league:
+                    by_league[lid] = {"id": lid, "name": name, "games": [], "live_count": 0}
+                by_league[lid]["games"].append(g)
+                by_league[lid]["live_count"] += 1
+
+    # Fetch today's non-live games concurrently
+    today_results = await asyncio.gather(
+        *[_fetch_today_for_league(lid, name, season, today_str, seen_ids)
+          for lid, (name, season) in league_items],
+        return_exceptions=True,
+    )
+
+    for i, (lid, (name, _)) in enumerate(league_items):
+        r = today_results[i] if i < len(today_results) else None
+        if not isinstance(r, list) or not r:
+            continue
+        if lid not in by_league:
+            by_league[lid] = {"id": lid, "name": name, "games": [], "live_count": 0}
+        for g in r:
+            g["_live"]     = False
+            g["_sig_type"] = "scheduled"
+            by_league[lid]["games"].append(g)
+
+    # Annotate each game with H2H cache info
+    for league in by_league.values():
+        for g in league["games"]:
+            key     = _matchup_key(g["home"], g["away"])
+            hz_vals = _h2h_cache.get(key, [])
+            ft_vals = _ft_h2h_cache.get(key, [])
+            g["h2h_count"]    = len(hz_vals)
+            g["h2h_avg_hz"]   = round(sum(hz_vals) / len(hz_vals), 1) if hz_vals else None
+            g["h2h_count_ft"] = len(ft_vals)
+            g["h2h_avg_ft"]   = round(sum(ft_vals) / len(ft_vals), 1) if ft_vals else None
+
+    # Sort: leagues with live games first, then alphabetically
+    leagues_list = sorted(
+        [l for l in by_league.values() if l["games"]],
+        key=lambda l: (-l["live_count"], l["name"]),
+    )
+    total = sum(len(l["games"]) for l in leagues_list)
+
+    log.info(
+        "scores — %d leagues, %d games total (%d live)",
+        len(leagues_list), total,
+        sum(l["live_count"] for l in leagues_list),
+    )
+    return {
+        "leagues": leagues_list,
+        "source":  "live",
+        "total":   total,
+    }
 
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────

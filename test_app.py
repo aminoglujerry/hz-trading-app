@@ -977,3 +977,26 @@ class TestLoadH2hFromSheetNormalization:
                 _app._h2h_cache.update(orig_hz)
                 _app._ft_h2h_cache.clear()
                 _app._ft_h2h_cache.update(orig_ft)
+
+
+# ─── /api/scores endpoint ─────────────────────────────────────────────────────
+
+
+class TestScoresEndpoint:
+    def test_returns_200(self, client):
+        r = client.get("/api/scores")
+        assert r.status_code == 200
+
+    def test_no_api_key_returns_empty(self, client):
+        data = client.get("/api/scores").json()
+        assert data["leagues"] == []
+        assert data["source"] == "no_key"
+        assert data["total"] == 0
+
+    def test_response_shape(self, client):
+        data = client.get("/api/scores").json()
+        assert "leagues" in data
+        assert "source" in data
+        assert "total" in data
+        assert isinstance(data["leagues"], list)
+        assert isinstance(data["total"], int)
