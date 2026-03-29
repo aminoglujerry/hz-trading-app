@@ -20,6 +20,10 @@ from app import (
     SEEN_FT_IDS_MAX,
     _h2h_cache,
     app,
+    _auto_signal_for_game,
+    H2H_MIN_SAMPLES,
+    _ft_h2h_cache,
+    _auto_sent,
 )
 
 
@@ -725,3 +729,141 @@ class TestStatsEndpoint:
             del _h2h_cache[key]
             del _ft_h2h_cache[key]
 
+
+# ─── _auto_signal_for_game ────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+class TestAutoSignalForGame:
+    """Unit tests for _auto_signal_for_game — no live API calls needed."""
+
+    _GAME_HZ = {
+        "id": 9999,
+        "home": "AutoHome",
+        "away": "AutoAway",
+        "status": "Q2",
+        "timer": 5,
+        "q1_total": 52,
+        "q2_live": 28,
+        "q3_home": 0,
+        "q3_away": 0,
+        "ht_total": 80,
+    }
+    _GAME_HT = {**_GAME_HZ, "status": "HT", "timer": None}
+    _GAME_FT = {
+        "id": 9998,
+        "home": "FTHome",
+        "away": "FTAway",
+        "status": "Q3BT",
+        "timer": None,
+        "q1_total": 50,
+        "q2_live": 44,
+        "q3_home": 26,
+        "q3_away": 22,
+        "ht_total": 94,
+    }
+
+    async def test_hz_returns_none_when_no_h2h(self):
+        """Without H2H entries the function must return None."""
+        _h2h_cache.pop(_matchup_key("AutoHome", "AutoAway"), None)
+        result = await _auto_signal_for_game(self._GAME_HZ, "hz")
+        assert result is None
+
+    async def test_hz_returns_none_when_too_few_samples(self):
+        """Fewer than H2H_MIN_SAMPLES entries → None."""
+        key = _matchup_key("AutoHome", "AutoAway")
+        _h2h_cache[key] = [95.0] * (H2H_MIN_SAMPLES - 1)
+        try:
+            result = await _auto_signal_for_game(self._GAME_HZ, "hz")
+            assert result is None
+        finally:
+            del _h2h_cache[key]
+
+    async def test_hz_returns_signal_with_enough_h2h(self):
+        """Enough H2H samples → signal dict is returned (any direction)."""
+        key = _matchup_key("AutoHome", "AutoAway")
+        # Q1=52, Q2=28 @ 5min → proj≈52+28+(28/5)*5=108, line=95 → buffer+13 → UNDER
+        _h2h_cache[key] = [95.0] * H2H_MIN_SAMPLES
+        try:
+            result = await _auto_signal_for_game(self._GAME_HZ, "hz")
+            assert result is not None
+            assert result["dir"] in ("UNDER", "OVER", "SKIP")
+            assert result["stufe"] in ("A", "B", "C")
+            assert result["type"] == "HZ"
+            assert "proj" in result
+            assert "buffer" in result
+            assert "reasons" in result
+        finally:
+            del _h2h_cache[key]
+
+    async def test_hz_halftime_mode(self):
+        """HT status triggers is_ht=True in the engine."""
+        key = _matchup_key("AutoHome", "AutoAway")
+        _h2h_cache[key] = [95.0] * H2H_MIN_SAMPLES
+        try:
+            result = await _auto_signal_for_game(self._GAME_HT, "hz")
+            assert result is not None
+            assert result["time_left"] == 0.0  # halftime → time_left always 0
+        finally:
+            del _h2h_cache[key]
+
+    async def test_ft_returns_none_when_no_h2h(self):
+        """Without FT H2H entries the function must return None."""
+        _ft_h2h_cache.pop(_matchup_key("FTHome", "FTAway"), None)
+        result = await _auto_signal_for_game(self._GAME_FT, "ft")
+        assert result is None
+
+    async def test_ft_returns_signal_with_enough_h2h(self):
+        """Enough FT H2H samples → signal dict is returned."""
+        key = _matchup_key("FTHome", "FTAway")
+        _ft_h2h_cache[key] = [186.0] * H2H_MIN_SAMPLES
+        try:
+            result = await _auto_signal_for_game(self._GAME_FT, "ft")
+            assert result is not None
+            assert result["dir"] in ("UNDER", "OVER", "SKIP")
+            assert result["type"] == "FT"
+        finally:
+            del _ft_h2h_cache[key]
+
+    async def test_hz_signal_uses_h2h_avg_as_line(self):
+        """The computed buffer must be relative to the H2H average line."""
+        key = _matchup_key("AutoHome", "AutoAway")
+        h2h_avg = 95.0
+        _h2h_cache[key] = [h2h_avg] * H2H_MIN_SAMPLES
+        try:
+            result = await _auto_signal_for_game(self._GAME_HZ, "hz")
+            assert result is not None
+            # With q1=52, q2=28 at timer=5 → proj=52+28+(28/5)*5=108 → buffer=108-95=13
+            assert result["buffer"] > 0
+        finally:
+            del _h2h_cache[key]
+
+
+# ─── /api/auto-scan endpoint ──────────────────────────────────────────────────
+
+
+class TestAutoScanEndpoint:
+    def test_returns_200(self, client):
+        r = client.get("/api/auto-scan")
+        assert r.status_code == 200
+
+    def test_response_fields(self, client):
+        r = client.get("/api/auto-scan")
+        data = r.json()
+        for field in ("sent", "interval_s", "min_stufe", "h2h_min", "dedup_entries",
+                      "hz_matchups", "ft_matchups"):
+            assert field in data, f"missing field: {field}"
+
+    def test_no_api_key_sends_nothing(self, client):
+        # In test environment API_SPORTS_KEY is not set → sent must be 0
+        r = client.get("/api/auto-scan")
+        data = r.json()
+        assert data["sent"] == 0
+
+    def test_interval_is_positive(self, client):
+        r = client.get("/api/auto-scan")
+        assert r.json()["interval_s"] > 0
+
+    def test_h2h_min_matches_constant(self, client):
+        r = client.get("/api/auto-scan")
+        assert r.json()["h2h_min"] == H2H_MIN_SAMPLES

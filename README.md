@@ -27,6 +27,10 @@ Alle in Render unter **Environment** setzen:
 | `GOOGLE_SHEETS_ID` | Sheet-ID aus der URL (`/d/<ID>/`) |
 | `GOOGLE_SHEETS_TAB` | Tab-Name exakt: `h2h_2025_2026` |
 | `GOOGLE_CREDENTIALS_JSON` | Kompletter Service Account JSON als eine Zeile |
+| `TELEGRAM_BOT_TOKEN` | Telegram Bot-Token für automatische Signal-Alerts |
+| `TELEGRAM_CHAT_ID` | Telegram Chat-ID für Signal-Alerts |
+| `AUTO_SCAN_INTERVAL` | Sekunden zwischen Auto-Scan-Zyklen (Standard: `120`) |
+| `AUTO_SCAN_STUFE` | Mindest-Signalstufe für Auto-Alerts (`A` oder `B`, Standard: `A`) |
 
 ---
 
@@ -86,6 +90,8 @@ Bei Bedarf manuell nachladen: `GET /api/reload-cache`
 | `GET /api/game-stats/{game_id}` | Live-Stats: Fouls, FT%, FG% pro Team (60s gecacht) |
 | `GET /api/signal/hz` | HZ Signal Engine als JSON API (Parameter siehe unten) |
 | `GET /api/signal/ft` | FT Signal Engine als JSON API (Parameter siehe unten) |
+| `GET /api/auto-scan` | Manuell einen Auto-Scan-Zyklus auslösen + Status anzeigen |
+| `GET /api/live-scan` | Aktive HZ/Q3BT-Spiele per Telegram melden (für externe Cron-Jobs) |
 | `GET /api/backfill?days=7&offset=0` | Historische FT-Daten ins Sheet schreiben (max 14 Tage) |
 | `GET /api/trigger-extract` | Manuell heutige FT-Spiele extrahieren |
 | `GET /api/reload-cache` | H2H Cache aus dem Sheet neu laden |
@@ -167,7 +173,32 @@ Bei Bedarf manuell nachladen: `GET /api/reload-cache`
 
 ---
 
-## Ligen
+## Auto-Signal (Automatisiertes Signal)
+
+Der Server führt automatisch alle `AUTO_SCAN_INTERVAL` Sekunden (Standard: 120 s) einen vollständigen Signal-Scan durch:
+
+1. Alle konfigurierten Ligen werden nach Live-Spielen im HZ (Halbzeit/Q2) und Q3-Break-Fenster durchsucht.
+2. Für jedes gefundene Spiel wird der **H2H-Durchschnitt als Referenzlinie** herangezogen (mind. 3 Einträge im Cache).
+3. Live-Spielstatistiken (Fouls, FT%, FG%) werden automatisch abgerufen.
+4. Die Signal-Engines (`_hz_engine` / `_ft_engine`) berechnen ein Signal.
+5. **Stufe-A-Signale** werden sofort via Telegram gesendet.
+
+**Deduplication:** Für jedes Spiel wird maximal ein Signal pro 25 Minuten gesendet.
+
+**Kein Bookie Line nötig:** Der H2H-Durchschnitt dient als automatische Referenzlinie.  
+→ Weicht die aktuelle Scoring-Pace signifikant vom historischen Mittelwert ab, erzeugt die Engine ein Signal.
+
+### Frontend-Auto-Kalkulation
+
+Sobald eine Live-Karte (HZ oder FT) angeklickt wird:
+- H2H-Durchschnitt und Live-Stats werden parallel geladen.
+- Wenn ein H2H-Wert vorhanden ist, wird er automatisch als Bookie Line vorausgefüllt.
+- Das Signal wird sofort berechnet und auf der Karte angezeigt.
+- Die Bookie Line kann jederzeit manuell überschrieben und neu berechnet werden.
+
+---
+
+
 
 | ID | Liga | Season |
 |---|---|---|
