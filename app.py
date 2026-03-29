@@ -722,17 +722,12 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;}
       <div class="manual-form" id="manualHz">
         <div class="mf-grid">
           <div class="mf-inp"><label>H2H Ø HZ</label><input type="number" id="hH2H" placeholder="96.5" step="0.5" inputmode="decimal"></div>
-          <div class="mf-inp"><label>Bookie Line</label><input type="number" id="hLine" placeholder="91.5" step="0.5" inputmode="decimal"></div>
           <div class="mf-inp"><label>Q1 Total</label><input type="number" id="hQ1" placeholder="52" inputmode="numeric"></div>
           <div class="mf-inp"><label>Q2 aktuell</label><input type="number" id="hQ2" placeholder="28" inputmode="numeric"></div>
           <div class="mf-inp"><label>Q2 Zeit (Min)</label><input type="number" id="hTimer" placeholder="4" min="0" max="10" step="0.5" inputmode="decimal"></div>
           <div class="mf-inp"><label>Fouls gesamt</label><input type="number" id="hFouls" placeholder="5" inputmode="numeric"></div>
           <div class="mf-inp"><label>FT% Ø</label><input type="number" id="hFT" placeholder="—" inputmode="numeric"></div>
           <div class="mf-inp"><label>FG%</label><input type="number" id="hFG" placeholder="—" inputmode="numeric"></div>
-        </div>
-        <div class="checks-row">
-          <div class="chk" id="chkDrop" onclick="this.classList.toggle('on')"><div class="chk-box">✓</div><span class="chk-lbl">Linie fällt ≥8</span></div>
-          <div class="chk" id="chkRise" onclick="this.classList.toggle('on')"><div class="chk-box">✓</div><span class="chk-lbl">Linie steigt</span></div>
         </div>
         <button class="btn-calc" onclick="calcManualHz()">▶ HZ SIGNAL</button>
       </div>
@@ -743,7 +738,6 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;}
       <div class="manual-form" id="manualFt">
         <div class="mf-grid">
           <div class="mf-inp"><label>H2H Ø FT</label><input type="number" id="fH2H" placeholder="188" step="0.5" inputmode="decimal"></div>
-          <div class="mf-inp"><label>FT Bookie Line</label><input type="number" id="fLine" placeholder="182.5" step="0.5" inputmode="decimal"></div>
           <div class="mf-inp"><label>Q3 Score Heim</label><input type="number" id="fQ3H" placeholder="25" inputmode="numeric"></div>
           <div class="mf-inp"><label>Q3 Score Gast</label><input type="number" id="fQ3A" placeholder="22" inputmode="numeric"></div>
           <div class="mf-inp"><label>HZ Total</label><input type="number" id="fHZ" placeholder="90" inputmode="numeric"></div>
@@ -848,7 +842,10 @@ async function loadHealth(){
 let _autoRefreshTimer=null;
 let _countdownTimer=null;
 let _nextRefreshAt=null;
-const AUTO_REFRESH_MS=60_000;
+const AUTO_REFRESH_MS=30_000;
+let _autoLoadBestSig=null;
+let _autoLoadBestCtx='';
+let _liveSignalMap={};
 
 function _startCountdown(){
   if(_countdownTimer)clearInterval(_countdownTimer);
@@ -880,9 +877,18 @@ function setLive(on,count){
 async function loadLive(silent=false){
   const btn=document.getElementById('refreshBtn');
   if(!silent){btn.textContent='...';btn.disabled=true;}
+  _autoLoadBestSig=null;_autoLoadBestCtx='';
   try{
-    const r=await fetch('/api/live');
-    const d=await r.json();
+    const [liveRes,sigRes]=await Promise.allSettled([
+      fetch('/api/live').then(r=>r.json()),
+      fetch('/api/live-signals').then(r=>r.json()),
+    ]);
+    const d=liveRes.status==='fulfilled'?liveRes.value:{games:[],q3:[],other:[],today:[],source:'error'};
+    const sigs=sigRes.status==='fulfilled'?sigRes.value:{hz:[],q3:[]};
+    // Build per-game signal lookup from server pre-computation
+    _liveSignalMap={};
+    for(const g of (sigs.hz||[])){_liveSignalMap[g.id]={sig:g.signal,line:g.h2h_line,count:g.h2h_count,type:'hz'};}
+    for(const g of (sigs.q3||[])){_liveSignalMap[g.id]={sig:g.signal,line:g.h2h_line,count:g.h2h_count,type:'ft'};}
     renderHzGames(d.games||[]);
     renderLiveOther(d.other||[]);
     renderToday(d.today||[]);
@@ -1014,27 +1020,24 @@ function renderSignal(sig){
 // ── Manual calcs ──
 function calcManualHz(){
   const h2h=parseFloat(document.getElementById('hH2H').value)||null;
-  const line=parseFloat(document.getElementById('hLine').value);
-  if(!line){alert('Bookie Line ist Pflicht!');return;}
-  const sig=hzEngine({h2h,line,
+  if(!h2h){alert('H2H Ø HZ eingeben!');return;}
+  const sig=hzEngine({h2h,line:h2h,
     q1:parseFloat(document.getElementById('hQ1').value)||0,
     q2:parseFloat(document.getElementById('hQ2').value)||0,
     timer:parseFloat(document.getElementById('hTimer').value)||0,
     fouls:parseFloat(document.getElementById('hFouls').value)||0,
     ft:parseFloat(document.getElementById('hFT').value)||null,
     fg:parseFloat(document.getElementById('hFG').value)||null,
-    lineDrop:document.getElementById('chkDrop').classList.contains('on'),
-    lineRise:document.getElementById('chkRise').classList.contains('on'),
+    lineDrop:false,lineRise:false,
   });
   renderSignal(sig);
   logSignal(sig,'Manuell HZ');
 }
 function calcManualFt(){
-  const line=parseFloat(document.getElementById('fLine').value);
-  if(!line){alert('FT Bookie Line ist Pflicht!');return;}
+  const h2h=parseFloat(document.getElementById('fH2H').value)||null;
+  if(!h2h){alert('H2H Ø FT eingeben!');return;}
   const sig=ftEngine({
-    h2h:parseFloat(document.getElementById('fH2H').value)||null,
-    line,
+    h2h,line:h2h,
     q3h:parseFloat(document.getElementById('fQ3H').value)||0,
     q3a:parseFloat(document.getElementById('fQ3A').value)||0,
     hz:parseFloat(document.getElementById('fHZ').value)||0,
@@ -1081,8 +1084,6 @@ async function autoLoadHzCard(g){
     if(d.found){
       note.textContent=`H2H Ø ${d.avg} (${d.count}x)`;note.className='h2h-note found';
       if(inp&&!inp.value){inp.value=d.avg;const lbl=document.getElementById('h2hlbl-'+id);if(lbl)lbl.textContent=`H2H Ø (${d.count}x)`;}
-      const lineInp=document.getElementById('iline-'+id);
-      if(lineInp&&!lineInp.value){lineInp.value=d.avg;lineInp.title='H2H-Ø als Referenz';}
       h2hAvg=d.avg;
     }else{if(note)note.textContent='H2H: kein Eintrag';}
   }catch(e){}
@@ -1105,6 +1106,17 @@ async function autoLoadHzCard(g){
     const tmr=parseFloat(card.dataset.timer)||0,isHT=card.dataset.isht==='1';
     const sig=hzEngine({h2h:h2hAvg,line:h2hAvg,q1,q2,timer:tmr,isHT,fouls,ft:ftPct,fg:fgPct,lineDrop:false,lineRise:false});
     _applyHzBadge(id,sig);
+    if(sig.dir!=='SKIP'){
+      const stufeOrd={A:3,B:2,C:1};
+      if(!_autoLoadBestSig||
+         (stufeOrd[sig.stufe]||0)>(stufeOrd[_autoLoadBestSig.stufe]||0)||
+         (sig.stufe===_autoLoadBestSig.stufe&&Math.abs(sig.buffer)>Math.abs(_autoLoadBestSig.buffer))){
+        _autoLoadBestSig=sig;
+        const teams=card.querySelectorAll('.card-team');
+        _autoLoadBestCtx=teams.length>=2?teams[0].textContent+' / '+teams[1].textContent:'';
+        renderSignal(sig);
+      }
+    }
   }
 }
 async function autoLoadFtCard(g){
@@ -1121,8 +1133,6 @@ async function autoLoadFtCard(g){
     if(d.found){
       note.textContent=`H2H FT Ø ${d.avg} (${d.count}x)`;note.className='h2h-note found';
       if(inp&&!inp.value){inp.value=d.avg;const ftlbl=document.getElementById('fth2hlbl-'+id);if(ftlbl)ftlbl.textContent=`H2H FT Ø (${d.count}x)`;}
-      const lineInp=document.getElementById('iftline-'+id);
-      if(lineInp&&!lineInp.value){lineInp.value=d.avg;lineInp.title='H2H-FT-Ø als Referenz';}
       h2hAvg=d.avg;
     }else{if(note)note.textContent='H2H FT: kein Eintrag';}
   }catch(e){}
@@ -1145,6 +1155,17 @@ async function autoLoadFtCard(g){
     const hz=parseFloat(card.dataset.hz)||0,q3h=parseFloat(card.dataset.q3h)||0,q3a=parseFloat(card.dataset.q3a)||0;
     const sig=ftEngine({h2h:h2hAvg,line:h2hAvg,q3h,q3a,hz,fouls,ftPctH:homeFt,ftPctA:awayFt});
     _applyFtBadge(id,sig);
+    if(sig.dir!=='SKIP'){
+      const stufeOrd={A:3,B:2,C:1};
+      if(!_autoLoadBestSig||
+         (stufeOrd[sig.stufe]||0)>(stufeOrd[_autoLoadBestSig.stufe]||0)||
+         (sig.stufe===_autoLoadBestSig.stufe&&Math.abs(sig.buffer)>Math.abs(_autoLoadBestSig.buffer))){
+        _autoLoadBestSig=sig;
+        const teams=card.querySelectorAll('.card-team');
+        _autoLoadBestCtx=teams.length>=2?teams[0].textContent+' / '+teams[1].textContent:'';
+        renderSignal(sig);
+      }
+    }
   }
 }
 async function autoLoadOtherCard(g){
@@ -1163,12 +1184,31 @@ async function autoLoadOtherCard(g){
 }
 
 // ── HZ Cards ──
+function _applyPrecomputedHzSignal(g){
+  const pre=_liveSignalMap[g.id];
+  if(!pre||!pre.sig)return false;
+  const note=document.getElementById('h2hn-'+g.id);
+  const inp=document.getElementById('ih2h-'+g.id);
+  if(note&&pre.line){note.textContent=`H2H Ø ${pre.line} (${pre.count}x)`;note.className='h2h-note found';}
+  if(inp&&!inp.value&&pre.line)inp.value=pre.line;
+  _applyHzBadge(g.id,pre.sig);
+  const stufeOrd={A:3,B:2,C:1};
+  if(pre.sig.dir!=='SKIP'){
+    if(!_autoLoadBestSig||
+       (stufeOrd[pre.sig.stufe]||0)>(stufeOrd[_autoLoadBestSig.stufe]||0)||
+       (pre.sig.stufe===_autoLoadBestSig.stufe&&Math.abs(pre.sig.buffer)>Math.abs(_autoLoadBestSig.buffer))){
+      _autoLoadBestSig=pre.sig;_autoLoadBestCtx=g.home+' / '+g.away;
+      renderSignal(pre.sig);
+    }
+  }
+  return true;
+}
 function renderHzGames(games){
   const w=document.getElementById('gamesWrap');
   if(!games.length){w.innerHTML='<div class="empty">Keine HT/Q2 Spiele live<br><span style="font-size:9px;color:var(--dim)">EU-Ligen meist 18–22 Uhr</span></div>';return;}
   w.innerHTML=games.map(g=>hzCard(g)).join('');
   applyWatchlistUI();
-  games.forEach(g=>autoLoadHzCard(g));
+  games.forEach(g=>{if(!_applyPrecomputedHzSignal(g))autoLoadHzCard(g);});
 }
 function hzCard(g){
   const isHT=g.status==='HT';
@@ -1196,7 +1236,6 @@ function hzCard(g){
     </div>
     <div class="card-inputs" id="ci-${g.id}">
       <div class="inp-group"><label id="h2hlbl-${g.id}">H2H Ø</label><input type="number" id="ih2h-${g.id}" placeholder="96.5" step="0.5" inputmode="decimal"></div>
-      <div class="inp-group"><label>Bookie Line</label><input type="number" id="iline-${g.id}" placeholder="91.5" step="0.5" inputmode="decimal"></div>
       <div class="inp-group"><label>Fouls</label><input type="number" id="ifouls-${g.id}" placeholder="5" min="0" inputmode="numeric"></div>
       <div class="inp-group"><label>FT% Ø</label><input type="number" id="ift-${g.id}" placeholder="—" inputmode="numeric"></div>
       <div class="inp-group"><label>FG%</label><input type="number" id="ifg-${g.id}" placeholder="—" inputmode="numeric"></div>
@@ -1217,9 +1256,6 @@ async function selectHzCard(id,home,away){
     const d=h2hRes.value;const note=document.getElementById('h2hn-'+id);const inp=document.getElementById('ih2h-'+id);
     if(d.found){note.textContent=`H2H Ø ${d.avg} (${d.count}x)`;note.className='h2h-note found';
       if(inp&&!inp.value){inp.value=d.avg;const lbl=document.getElementById('h2hlbl-'+id);if(lbl)lbl.textContent=`H2H Ø (${d.count}x)`;}
-      // Pre-fill bookie line with H2H avg if the user hasn't entered one yet
-      const lineInp=document.getElementById('iline-'+id);
-      if(lineInp&&!lineInp.value){lineInp.value=d.avg;lineInp.title='H2H-Ø als Referenz (Bookie Line überschreiben)';}
       h2hAvg=d.avg;
     }else{note.textContent='H2H: kein Eintrag';note.className='h2h-note';}
   }catch(e){document.getElementById('h2hn-'+id).textContent='H2H: Fehler';}
@@ -1236,7 +1272,7 @@ async function selectHzCard(id,home,away){
       if(note&&extra)note.textContent+=extra;
     }
   }catch(e){}
-  // Auto-calculate signal as soon as H2H (used as reference line) is available
+  // Auto-calculate signal using H2H as reference line
   if(h2hAvg&&card){
     const q1=parseFloat(card.dataset.q1)||0;
     const q2=parseFloat(card.dataset.q2)||0;
@@ -1244,27 +1280,13 @@ async function selectHzCard(id,home,away){
     const isHT=card.dataset.isht==='1';
     calcHzCard(id,q1,q2,tmr,isHT);
   }
-  // Odds feed: pre-fill bookie line only if user hasn't typed anything
-  try{
-    const oddsD=await fetch(`/api/odds?home=${encodeURIComponent(home)}&away=${encodeURIComponent(away)}`).then(r=>r.json());
-    if(oddsD.found){
-      const lineInp=document.getElementById('iline-'+id);
-      if(lineInp&&!lineInp.value){
-        lineInp.value=oddsD.line;
-        lineInp.title=`Odds: ${oddsD.line} (${oddsD.bookmaker||'TheOddsAPI'})`;
-        const note=document.getElementById('h2hn-'+id);
-        if(note)note.textContent+=(note.textContent?' · ':'')+'Odds: '+oddsD.line;
-      }
-    }
-  }catch(e){}
 }
 function calcHzCard(id,q1,q2live,timer,isHT=false){
-  const line=parseFloat(document.getElementById('iline-'+id).value);
-  if(!line){alert('Bookie Line eingeben!');return;}
+  const h2h=parseFloat(document.getElementById('ih2h-'+id)?.value)||null;
+  if(!h2h)return;
   const sig=hzEngine({
-    h2h:parseFloat(document.getElementById('ih2h-'+id).value)||null,
-    line,q1,q2:q2live,timer,isHT,
-    fouls:parseFloat(document.getElementById('ifouls-'+id).value)||0,
+    h2h,line:h2h,q1,q2:q2live,timer,isHT,
+    fouls:parseFloat(document.getElementById('ifouls-'+id)?.value)||0,
     ft:parseFloat(document.getElementById('ift-'+id)?.value)||null,
     fg:parseFloat(document.getElementById('ifg-'+id)?.value)||null,
     lineDrop:false,lineRise:false,
@@ -1328,7 +1350,7 @@ function renderFtCandidates(games){
   if(!games.length){w.innerHTML='<div class="empty">Keine Spiele am Q3 Break</div>';return;}
   w.innerHTML=games.map(g=>ftCard(g)).join('');
   applyWatchlistUI();
-  games.forEach(g=>autoLoadFtCard(g));
+  games.forEach(g=>{if(!_applyPrecomputedFtSignal(g))autoLoadFtCard(g);});
 }
 function ftCard(g){
   const q3tot=(g.q3_home||0)+(g.q3_away||0);
@@ -1355,13 +1377,31 @@ function ftCard(g){
     </div>
     <div class="ft-card-inputs" id="ftci-${g.id}">
       <div class="inp-group"><label id="fth2hlbl-${g.id}">H2H FT Ø</label><input type="number" id="ifth2h-${g.id}" placeholder="188" step="0.5" inputmode="decimal"></div>
-      <div class="inp-group"><label>FT Bookie Line</label><input type="number" id="iftline-${g.id}" placeholder="182.5" step="0.5" inputmode="decimal"></div>
       <div class="inp-group"><label>Fouls</label><input type="number" id="iftfouls-${g.id}" placeholder="10" inputmode="numeric"></div>
       <div class="inp-group"><label>FT% Heim</label><input type="number" id="iftfth-${g.id}" placeholder="78" inputmode="numeric"></div>
       <div class="inp-group"><label>FT% Gast</label><input type="number" id="iftfta-${g.id}" placeholder="75" inputmode="numeric"></div>
       <button class="calc-mini" onclick="event.stopPropagation();calcFtCard(${g.id},${g.ht_total},${g.q3_home||0},${g.q3_away||0})">▶ FT SIGNAL</button>
     </div>
   </div>`;
+}
+function _applyPrecomputedFtSignal(g){
+  const pre=_liveSignalMap[g.id];
+  if(!pre||!pre.sig)return false;
+  const note=document.getElementById('fth2hn-'+g.id);
+  const inp=document.getElementById('ifth2h-'+g.id);
+  if(note&&pre.line){note.textContent=`H2H FT Ø ${pre.line} (${pre.count}x)`;note.className='h2h-note found';}
+  if(inp&&!inp.value&&pre.line)inp.value=pre.line;
+  _applyFtBadge(g.id,pre.sig);
+  const stufeOrd={A:3,B:2,C:1};
+  if(pre.sig.dir!=='SKIP'){
+    if(!_autoLoadBestSig||
+       (stufeOrd[pre.sig.stufe]||0)>(stufeOrd[_autoLoadBestSig.stufe]||0)||
+       (pre.sig.stufe===_autoLoadBestSig.stufe&&Math.abs(pre.sig.buffer)>Math.abs(_autoLoadBestSig.buffer))){
+      _autoLoadBestSig=pre.sig;_autoLoadBestCtx=g.home+' / '+g.away;
+      renderSignal(pre.sig);
+    }
+  }
+  return true;
 }
 async function selectFtCard(id,home,away){
   document.querySelectorAll('.ft-card').forEach(c=>{c.classList.remove('selected');const ci=c.querySelector('.ft-card-inputs');if(ci)ci.classList.remove('open');});
@@ -1378,9 +1418,6 @@ async function selectFtCard(id,home,away){
       note.textContent=`H2H FT Ø ${d.avg} (${d.count}x)`;note.className='h2h-note found';
       const inp=document.getElementById('ifth2h-'+id);
       if(inp&&!inp.value){inp.value=d.avg;const ftlbl=document.getElementById('fth2hlbl-'+id);if(ftlbl)ftlbl.textContent=`H2H FT Ø (${d.count}x)`;}
-      // Pre-fill bookie line with H2H FT avg if the user hasn't entered one yet
-      const lineInp=document.getElementById('iftline-'+id);
-      if(lineInp&&!lineInp.value){lineInp.value=d.avg;lineInp.title='H2H-FT-Ø als Referenz (Bookie Line überschreiben)';}
       h2hAvg=d.avg;
     }else{note.textContent='H2H FT: kein Eintrag';note.className='h2h-note';}
   }catch(e){}
@@ -1400,7 +1437,7 @@ async function selectFtCard(id,home,away){
       if(note&&extra)note.textContent+=extra;
     }
   }catch(e){}
-  // Auto-calculate signal as soon as H2H FT (used as reference line) is available
+  // Auto-calculate signal using H2H FT as reference line
   if(h2hAvg&&card){
     const hz=parseFloat(card.dataset.hz)||0;
     const q3h=parseFloat(card.dataset.q3h)||0;
@@ -1409,14 +1446,13 @@ async function selectFtCard(id,home,away){
   }
 }
 function calcFtCard(id,hz,q3h,q3a){
-  const line=parseFloat(document.getElementById('iftline-'+id).value);
-  if(!line){alert('FT Bookie Line eingeben!');return;}
+  const h2h=parseFloat(document.getElementById('ifth2h-'+id)?.value)||null;
+  if(!h2h)return;
   const sig=ftEngine({
-    h2h:parseFloat(document.getElementById('ifth2h-'+id).value)||null,
-    line,q3h,q3a,hz,
-    fouls:parseFloat(document.getElementById('iftfouls-'+id).value)||0,
-    ftPctH:parseFloat(document.getElementById('iftfth-'+id).value)||null,
-    ftPctA:parseFloat(document.getElementById('iftfta-'+id).value)||null,
+    h2h,line:h2h,q3h,q3a,hz,
+    fouls:parseFloat(document.getElementById('iftfouls-'+id)?.value)||0,
+    ftPctH:parseFloat(document.getElementById('iftfth-'+id)?.value)||null,
+    ftPctA:parseFloat(document.getElementById('iftfta-'+id)?.value)||null,
   });
   const card=document.getElementById('ftc-'+id);
   const cls=sig.dir==='UNDER'?'sig-under':sig.dir==='OVER'?'sig-over':'';
@@ -1492,11 +1528,6 @@ function previewCard(g){
         <div class="score-block"><div style="font-size:10px;color:var(--dim2);text-align:center;">vs</div></div>
         <div class="card-team away">${g.away}</div>
       </div>
-      <div class="pre-line-row">
-        <label>HZ Line</label>
-        <input type="number" id="pvline-${g.id}" placeholder="91.5" step="0.5" inputmode="decimal"
-          oninput="calcPreSignal(${g.id})">
-      </div>
       <div class="pre-card-bot">
         <div style="display:flex;flex-direction:column;gap:2px;">
           <span class="h2h-note" id="pvh2h-${g.id}">H2H lädt…</span>
@@ -1522,8 +1553,6 @@ async function loadPreviewH2h(g){
       note.className='h2h-note found';
       card.classList.remove('no-h2h');
       card.dataset.h2h=hzD.avg;
-      const lineEl=document.getElementById('pvline-'+g.id);
-      if(lineEl&&!lineEl.value)lineEl.value=hzD.avg;
       calcPreSignal(g.id);
     }else{
       note.innerHTML='<span class="h2h-missing">H2H fehlt — Backfill nötig</span>';
@@ -1539,18 +1568,6 @@ async function loadPreviewH2h(g){
         ftNote.style.color='var(--dim)';
       }
     }
-    // Odds feed: override line with bookie odds only if user hasn't typed anything
-    try{
-      const oddsD=await fetch(`/api/odds?home=${encodeURIComponent(g.home)}&away=${encodeURIComponent(g.away)}`).then(r=>r.json());
-      if(oddsD.found){
-        const lineEl=document.getElementById('pvline-'+g.id);
-        if(lineEl&&!lineEl.value){
-          lineEl.value=oddsD.line;
-          lineEl.title=`Odds: ${oddsD.line} (${oddsD.bookmaker||'TheOddsAPI'})`;
-          calcPreSignal(g.id);
-        }
-      }
-    }catch(e){}
   }catch(e){
     const note=document.getElementById('pvh2h-'+g.id);
     if(note)note.textContent='H2H: Fehler';
@@ -1561,19 +1578,9 @@ function calcPreSignal(id){
   const badge=document.getElementById('pvbadge-'+id);
   if(!card||!badge)return;
   const h2h=parseFloat(card.dataset.h2h);
-  const line=parseFloat(document.getElementById('pvline-'+id)?.value);
-  if(!Number.isFinite(h2h)||!Number.isFinite(line)||h2h===0||line===0){badge.textContent='—';badge.className='pre-sig-badge neutral';return;}
-  const buf=+(h2h-line).toFixed(1);
-  if(buf>=5){
-    badge.textContent=`UNDER ▾ +${buf}`;
-    badge.className='pre-sig-badge under';
-  }else if(buf<=-5){
-    badge.textContent=`OVER ▴ ${buf}`;
-    badge.className='pre-sig-badge over';
-  }else{
-    badge.textContent=`NEUTRAL ${buf>=0?'+':''}${buf}`;
-    badge.className='pre-sig-badge neutral';
-  }
+  if(!Number.isFinite(h2h)||h2h===0){badge.textContent='—';badge.className='pre-sig-badge neutral';return;}
+  badge.textContent=`H2H ${h2h}`;
+  badge.className='pre-sig-badge neutral';
 }
 
 // ── Live calculation while typing (debounced 400ms) ──
@@ -1581,30 +1588,27 @@ let _debHz=null,_debFt=null;
 function _liveHz(){
   clearTimeout(_debHz);
   _debHz=setTimeout(()=>{
-    const line=parseFloat(document.getElementById('hLine').value);
-    if(!line)return;
+    const h2h=parseFloat(document.getElementById('hH2H').value)||null;
+    if(!h2h)return;
     renderSignal(hzEngine({
-      h2h:parseFloat(document.getElementById('hH2H').value)||null,
-      line,
+      h2h,line:h2h,
       q1:parseFloat(document.getElementById('hQ1').value)||0,
       q2:parseFloat(document.getElementById('hQ2').value)||0,
       timer:parseFloat(document.getElementById('hTimer').value)||0,
       fouls:parseFloat(document.getElementById('hFouls').value)||0,
       ft:parseFloat(document.getElementById('hFT').value)||null,
       fg:parseFloat(document.getElementById('hFG').value)||null,
-      lineDrop:document.getElementById('chkDrop').classList.contains('on'),
-      lineRise:document.getElementById('chkRise').classList.contains('on'),
+      lineDrop:false,lineRise:false,
     }));
   },400);
 }
 function _liveFt(){
   clearTimeout(_debFt);
   _debFt=setTimeout(()=>{
-    const line=parseFloat(document.getElementById('fLine').value);
-    if(!line)return;
+    const h2h=parseFloat(document.getElementById('fH2H').value)||null;
+    if(!h2h)return;
     renderSignal(ftEngine({
-      h2h:parseFloat(document.getElementById('fH2H').value)||null,
-      line,
+      h2h,line:h2h,
       q3h:parseFloat(document.getElementById('fQ3H').value)||0,
       q3a:parseFloat(document.getElementById('fQ3A').value)||0,
       hz:parseFloat(document.getElementById('fHZ').value)||0,
@@ -2005,12 +2009,10 @@ document.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('mToggleHz').classList.add('open');
 
   // wire live-calc listeners on all manual inputs
-  ['hH2H','hLine','hQ1','hQ2','hTimer','hFouls','hFT','hFG'].forEach(id=>{
+  ['hH2H','hQ1','hQ2','hTimer','hFouls','hFT','hFG'].forEach(id=>{
     document.getElementById(id).addEventListener('input',_liveHz);
   });
-  document.getElementById('chkDrop').addEventListener('click',()=>setTimeout(_liveHz,50));
-  document.getElementById('chkRise').addEventListener('click',()=>setTimeout(_liveHz,50));
-  ['fH2H','fLine','fQ3H','fQ3A','fHZ','fFouls','fFTH','fFTA'].forEach(id=>{
+  ['fH2H','fQ3H','fQ3A','fHZ','fFouls','fFTH','fFTA'].forEach(id=>{
     document.getElementById(id).addEventListener('input',_liveFt);
   });
 
@@ -3139,6 +3141,72 @@ async def live_scan():
         "count":         len(hz_games) + len(q3_games),
         "telegram_sent": sent,
         "source":        "live",
+    }
+
+
+@app.get("/api/live-signals")
+async def get_live_signals():
+    """
+    Returns all live HZ + Q3BT games with pre-computed signals.
+    Uses H2H cache average as the reference line — no bookie line needed.
+    The frontend uses this to populate game cards immediately on load.
+    """
+    if not API_KEY:
+        return {"hz": [], "q3": [], "source": "no_api_key", "hz_count": 0, "q3_count": 0}
+
+    results = await asyncio.gather(
+        *[_fetch_live_for_league(lid, name, season)
+          for lid, (name, season) in LEAGUES.items()],
+        return_exceptions=True,
+    )
+
+    hz_games: list = []
+    q3_games: list = []
+    seen_ids: set  = set()
+
+    for r in results:
+        if not isinstance(r, tuple):
+            continue
+        hz, q3, _ = r
+        for g in hz:
+            if g["id"] not in seen_ids:
+                seen_ids.add(g["id"])
+                hz_games.append(g)
+        for g in q3:
+            if g["id"] not in seen_ids:
+                seen_ids.add(g["id"])
+                q3_games.append(g)
+
+    async def _enrich(g: dict, sig_type: str) -> dict:
+        entry = dict(g)
+        key   = _matchup_key(g["home"], g["away"])
+        cache = _h2h_cache if sig_type == "hz" else _ft_h2h_cache
+        vals  = cache.get(key, [])
+        line  = round(sum(vals) / len(vals), 1) if vals else None
+        entry["h2h_line"]  = line
+        entry["h2h_count"] = len(vals)
+        try:
+            sig = await _auto_signal_for_game(g, sig_type)
+            entry["signal"] = sig
+        except Exception:
+            entry["signal"] = None
+        return entry
+
+    hz_enriched, q3_enriched = await asyncio.gather(
+        asyncio.gather(*[_enrich(g, "hz") for g in hz_games]),
+        asyncio.gather(*[_enrich(g, "ft") for g in q3_games]),
+    )
+
+    log.info(
+        "live-signals — HZ:%d  Q3:%d",
+        len(hz_games), len(q3_games),
+    )
+    return {
+        "hz":       list(hz_enriched),
+        "q3":       list(q3_enriched),
+        "source":   "live",
+        "hz_count": len(hz_games),
+        "q3_count": len(q3_games),
     }
 
 
