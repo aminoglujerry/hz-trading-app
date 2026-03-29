@@ -38,6 +38,9 @@ CREDS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 
+ODDS_API_KEY       = os.getenv("ODDS_API_KEY", "")
+ODDS_API_BASE      = "https://api.the-odds-api.com/v4"
+
 # ─── Signal Engine Constants ──────────────────────────────────────────────────
 
 # HZ Engine
@@ -66,7 +69,7 @@ FT_H2H_CONFIRM_BUFFER = 5      # h2h_buf ≥ this → H2H confirmation on UNDER
 SEEN_FT_IDS_MAX       = 10_000  # FIFO cap for _seen_ft_ids (prevents unbounded growth)
 SCHEDULER_INTERVAL    = 1800    # seconds between background extract runs
 BACKFILL_SLEEP        = 0.5     # seconds between days in backfill loop
-BACKFILL_MAX_DAYS     = 14      # max days per backfill request
+BACKFILL_MAX_DAYS     = 28      # max days per backfill request
 GAME_STATS_CACHE_TTL  = 60      # seconds to cache /api/game-stats responses
 API_TIMEOUT           = 12      # httpx request timeout (seconds)
 TODAY_GAMES_LIMIT     = 40      # max games returned in today list
@@ -620,6 +623,18 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;}
   font-family:'Barlow',sans-serif;text-transform:uppercase;
 }
 .stats-action-btn:hover{border-color:var(--over);color:var(--over);}
+.backfill-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px;}
+.bf-select,.bf-input{
+  background:var(--bg);border:1px solid var(--border2);color:var(--text);
+  font-family:'Barlow',sans-serif;font-size:10px;padding:4px 6px;
+  min-width:0;
+}
+.bf-select{flex:1 1 80px;max-width:110px;}
+.bf-input{flex:1 1 60px;max-width:80px;}
+.backfill-progress{
+  font-size:10px;color:var(--gold);letter-spacing:.5px;
+  margin-top:6px;min-height:16px;
+}
 </style>
 </head>
 <body>
@@ -774,6 +789,25 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;}
 </div>
 
 <script>
+// ── Signal Engine Constants (mirrors Python constants) ──
+const HZ_BUFFER_UNDER       = 5;
+const HZ_BUFFER_OVER        = 3;
+const HZ_ENTRY_MIN          = 2.5;
+const HZ_ENTRY_OPTIMAL      = 3.5;
+const HZ_FOULS_THRESHOLD    = 8;
+const HZ_FT_PCT_CATALYST    = 85;
+const HZ_FG_SKIP            = 60;
+const HZ_H2H_OVER_BUFFER    = -3;
+const HZ_H2H_UNDER_KONTRA   = 0;
+const HZ_H2H_CONFIRM_BUFFER = 3;
+const FT_BUFFER_UNDER_A     = 8;
+const FT_BUFFER_UNDER_B     = 10;
+const FT_BUFFER_OVER        = 8;
+const FT_FT_PCT_THRESHOLD   = 75;
+const FT_GAP_MAX            = 20;
+const FT_FOULS_CATALYST     = 10;
+const FT_H2H_CONFIRM_BUFFER = 5;
+
 // switchTab is kept for backwards-compat but does nothing in new layout
 function switchTab(){}
 
@@ -870,30 +904,30 @@ function hzEngine({h2h,line,q1,q2,timer,fouls,ft,fg,lineDrop,lineRise,isHT=false
   const proj=q1+q2proj;
   const buffer=proj-line;
   const h2hBuf=h2h!=null&&h2h>0?h2h-line:null;
-  const foulsOC=fouls>=8,ftOC=ft!==null&&ft>=85,lineMC=lineDrop||lineRise;
-  const h2hOverCat=h2hBuf!==null&&h2hBuf<=-3;
+  const foulsOC=fouls>=HZ_FOULS_THRESHOLD,ftOC=ft!==null&&ft>=HZ_FT_PCT_CATALYST,lineMC=lineDrop||lineRise;
+  const h2hOverCat=h2hBuf!==null&&h2hBuf<=HZ_H2H_OVER_BUFFER;
   const overCat=foulsOC||ftOC||lineMC||h2hOverCat;
-  const fgSkip=fg!==null&&fg>60;
+  const fgSkip=fg!==null&&fg>HZ_FG_SKIP;
   // At HT entry is always valid (it's the last moment to bet HZ line)
-  const entryOk=isHT||timeLeft>=2.5,entryA=isHT||timeLeft>=3.5;
+  const entryOk=isHT||timeLeft>=HZ_ENTRY_MIN,entryA=isHT||timeLeft>=HZ_ENTRY_OPTIMAL;
   let dir='SKIP',stufe='C',reasons=[];
-  if(buffer>=5&&entryOk&&fouls<8&&!fgSkip){
+  if(buffer>=HZ_BUFFER_UNDER&&entryOk&&fouls<HZ_FOULS_THRESHOLD&&!fgSkip){
     dir='UNDER';
     if(entryA){
-      if(h2hBuf!==null&&h2hBuf<0){
-        stufe='B';reasons=[`<span class="r-ok">✓ Buffer +${buffer.toFixed(1)} ≥ 5</span>`,`<span class="r-warn">~ H2H ${h2h} &lt; Linie → kontra</span>`];
+      if(h2hBuf!==null&&h2hBuf<HZ_H2H_UNDER_KONTRA){
+        stufe='B';reasons=[`<span class="r-ok">✓ Buffer +${buffer.toFixed(1)} ≥ ${HZ_BUFFER_UNDER}</span>`,`<span class="r-warn">~ H2H ${h2h} &lt; Linie → kontra</span>`];
       }else{
-        stufe='A';reasons=[`<span class="r-ok">✓ Buffer +${buffer.toFixed(1)} ≥ 5</span>`];
+        stufe='A';reasons=[`<span class="r-ok">✓ Buffer +${buffer.toFixed(1)} ≥ ${HZ_BUFFER_UNDER}</span>`];
         if(isHT)reasons.push(`<span class="r-ok">✓ Halbzeit — Ergebnis steht</span>`);
-        else reasons.push(`<span class="r-ok">✓ Entry ${timeLeft.toFixed(1)}′</span>`,`<span class="r-ok">✓ Fouls ${fouls} &lt; 8</span>`);
-        if(h2hBuf!==null&&h2hBuf>=3)reasons.push(`<span class="r-ok">✓ H2H +${h2hBuf.toFixed(1)} bestätigt</span>`);
+        else reasons.push(`<span class="r-ok">✓ Entry ${timeLeft.toFixed(1)}′</span>`,`<span class="r-ok">✓ Fouls ${fouls} &lt; ${HZ_FOULS_THRESHOLD}</span>`);
+        if(h2hBuf!==null&&h2hBuf>=HZ_H2H_CONFIRM_BUFFER)reasons.push(`<span class="r-ok">✓ H2H +${h2hBuf.toFixed(1)} bestätigt</span>`);
       }
     }else{stufe='B';reasons=[`<span class="r-warn">~ Buffer +${buffer.toFixed(1)}</span>`,`<span class="r-warn">~ Entry ${timeLeft.toFixed(1)}′ spät</span>`];}
-  }else if(buffer<=-3&&entryOk){
+  }else if(buffer<=-HZ_BUFFER_OVER&&entryOk){
     dir='OVER';
     if(overCat){
       stufe='A';
-      if(foulsOC)reasons.push(`<span class="r-ok">🔥 Fouls ${fouls} ≥ 8</span>`);
+      if(foulsOC)reasons.push(`<span class="r-ok">🔥 Fouls ${fouls} ≥ ${HZ_FOULS_THRESHOLD}</span>`);
       if(ftOC)reasons.push(`<span class="r-ok">🔥 FT% ${ft}%</span>`);
       if(lineMC)reasons.push(`<span class="r-ok">🔥 Linie bewegt</span>`);
       if(h2hOverCat)reasons.push(`<span class="r-ok">🔥 H2H ${h2hBuf.toFixed(1)} unter Linie</span>`);
@@ -901,10 +935,10 @@ function hzEngine({h2h,line,q1,q2,timer,fouls,ft,fg,lineDrop,lineRise,isHT=false
     if(isHT)reasons.push(`<span class="r-ok">✓ Halbzeit — Ergebnis steht</span>`);
     else reasons.push(`<span class="r-ok">✓ Entry ${timeLeft.toFixed(1)}′</span>`);
   }else{
-    if(fgSkip)reasons.push(`<span class="r-bad">✗ FG% ${fg}% &gt; 60</span>`);
+    if(fgSkip)reasons.push(`<span class="r-bad">✗ FG% ${fg}% &gt; ${HZ_FG_SKIP}</span>`);
     if(!isHT&&!entryOk)reasons.push(`<span class="r-bad">✗ Entry ${timeLeft.toFixed(1)}′ &lt; 2:30</span>`);
-    if(Math.abs(buffer)<3)reasons.push(`<span class="r-bad">✗ Buffer ${buffer.toFixed(1)} &lt; 3</span>`);
-    if(fouls>=8&&buffer>0)reasons.push(`<span class="r-warn">⚠ Fouls ≥8 → OVER prüfen</span>`);
+    if(Math.abs(buffer)<HZ_BUFFER_OVER)reasons.push(`<span class="r-bad">✗ Buffer ${buffer.toFixed(1)} &lt; ${HZ_BUFFER_OVER}</span>`);
+    if(fouls>=HZ_FOULS_THRESHOLD&&buffer>0)reasons.push(`<span class="r-warn">⚠ Fouls ≥${HZ_FOULS_THRESHOLD} → OVER prüfen</span>`);
     if(!reasons.length)reasons.push(`<span class="r-bad">✗ Kein Signal</span>`);
   }
   return{dir,stufe,proj,buffer,timeLeft,fouls,reasons,type:'HZ'};
@@ -917,32 +951,32 @@ function ftEngine({h2h,line,q3h,q3a,hz,fouls,ftPctH,ftPctA}){
   const gap=Math.abs(q3h-q3a);
   const buffer=current-line;
   const h2hBuf=h2h!=null&&h2h>0?h2h-line:null;
-  const ftOK=(ftPctH!=null&&ftPctH>=75)&&(ftPctA!=null&&ftPctA>=75);
+  const ftOK=(ftPctH!=null&&ftPctH>=FT_FT_PCT_THRESHOLD)&&(ftPctA!=null&&ftPctA>=FT_FT_PCT_THRESHOLD);
   let dir='SKIP',stufe='C',reasons=[];
-  if(gap>20){
-    reasons.push(`<span class="r-bad">✗ Gap ${gap} &gt; 20 → Garbage Time Skip</span>`);
+  if(gap>FT_GAP_MAX){
+    reasons.push(`<span class="r-bad">✗ Gap ${gap} &gt; ${FT_GAP_MAX} → Garbage Time Skip</span>`);
     return{dir,stufe,proj:current,buffer,timeLeft:null,fouls,reasons,type:'FT'};
   }
-  if(buffer>=8&&ftOK){
+  if(buffer>=FT_BUFFER_UNDER_A&&ftOK){
     dir='UNDER';stufe='A';
-    reasons.push(`<span class="r-ok">✓ Buffer +${buffer.toFixed(1)} ≥ 8</span>`);
-    reasons.push(`<span class="r-ok">✓ FT% Heim ${ftPctH}% / Gast ${ftPctA}% ≥ 75</span>`);
-    if(h2hBuf!==null&&h2hBuf>=5)reasons.push(`<span class="r-ok">✓ H2H +${h2hBuf.toFixed(1)} bestätigt</span>`);
-  }else if(buffer>=10){
+    reasons.push(`<span class="r-ok">✓ Buffer +${buffer.toFixed(1)} ≥ ${FT_BUFFER_UNDER_A}</span>`);
+    reasons.push(`<span class="r-ok">✓ FT% Heim ${ftPctH}% / Gast ${ftPctA}% ≥ ${FT_FT_PCT_THRESHOLD}</span>`);
+    if(h2hBuf!==null&&h2hBuf>=FT_H2H_CONFIRM_BUFFER)reasons.push(`<span class="r-ok">✓ H2H +${h2hBuf.toFixed(1)} bestätigt</span>`);
+  }else if(buffer>=FT_BUFFER_UNDER_B){
     dir='UNDER';stufe=ftOK?'A':'B';
-    reasons.push(`<span class="r-ok">✓ Buffer +${buffer.toFixed(1)} ≥ 10</span>`);
-    if(!ftOK)reasons.push(`<span class="r-warn">~ FT% unter 75 → Stufe B</span>`);
-  }else if(buffer<=-8&&ftOK){
+    reasons.push(`<span class="r-ok">✓ Buffer +${buffer.toFixed(1)} ≥ ${FT_BUFFER_UNDER_B}</span>`);
+    if(!ftOK)reasons.push(`<span class="r-warn">~ FT% unter ${FT_FT_PCT_THRESHOLD} → Stufe B</span>`);
+  }else if(buffer<=-FT_BUFFER_OVER&&ftOK){
     dir='OVER';stufe='A';
     reasons.push(`<span class="r-ok">✓ Buffer ${buffer.toFixed(1)} ≤ −8</span>`);
-    reasons.push(`<span class="r-ok">✓ FT% Heim ${ftPctH}% / Gast ${ftPctA}% ≥ 75</span>`);
-    if(fouls>=10)reasons.push(`<span class="r-ok">🔥 Fouls ${fouls} ≥ 10</span>`);
-  }else if(buffer<=-8){
+    reasons.push(`<span class="r-ok">✓ FT% Heim ${ftPctH}% / Gast ${ftPctA}% ≥ ${FT_FT_PCT_THRESHOLD}</span>`);
+    if(fouls>=FT_FOULS_CATALYST)reasons.push(`<span class="r-ok">🔥 Fouls ${fouls} ≥ ${FT_FOULS_CATALYST}</span>`);
+  }else if(buffer<=-FT_BUFFER_OVER){
     dir='OVER';stufe='B';
-    reasons.push(`<span class="r-warn">~ Buffer ${buffer.toFixed(1)} ≤ −8</span>`);
+    reasons.push(`<span class="r-warn">~ Buffer ${buffer.toFixed(1)} ≤ −${FT_BUFFER_OVER}</span>`);
     reasons.push(`<span class="r-warn">~ FT% nicht erfüllt → Stufe B</span>`);
   }else{
-    reasons.push(`<span class="r-bad">✗ Buffer ${buffer.toFixed(1)} — min ±8 für FT</span>`);
+    reasons.push(`<span class="r-bad">✗ Buffer ${buffer.toFixed(1)} — min ±${FT_BUFFER_OVER} für FT</span>`);
   }
   return{dir,stufe,proj:current,buffer,timeLeft:null,fouls,reasons,type:'FT'};
 }
@@ -1087,6 +1121,19 @@ async function selectHzCard(id,home,away){
     const isHT=card.dataset.isht==='1';
     calcHzCard(id,q1,q2,tmr,isHT);
   }
+  // Odds feed: pre-fill bookie line only if user hasn't typed anything
+  try{
+    const oddsD=await fetch(`/api/odds?home=${encodeURIComponent(home)}&away=${encodeURIComponent(away)}`).then(r=>r.json());
+    if(oddsD.found){
+      const lineInp=document.getElementById('iline-'+id);
+      if(lineInp&&!lineInp.value){
+        lineInp.value=oddsD.line;
+        lineInp.title=`Odds: ${oddsD.line} (${oddsD.bookmaker||'TheOddsAPI'})`;
+        const note=document.getElementById('h2hn-'+id);
+        if(note)note.textContent+=(note.textContent?' · ':'')+'Odds: '+oddsD.line;
+      }
+    }
+  }catch(e){}
 }
 function calcHzCard(id,q1,q2live,timer,isHT=false){
   const line=parseFloat(document.getElementById('iline-'+id).value);
@@ -1330,6 +1377,8 @@ async function loadPreviewH2h(g){
       note.className='h2h-note found';
       card.classList.remove('no-h2h');
       card.dataset.h2h=hzD.avg;
+      const lineEl=document.getElementById('pvline-'+g.id);
+      if(lineEl&&!lineEl.value)lineEl.value=hzD.avg;
       calcPreSignal(g.id);
     }else{
       note.innerHTML='<span class="h2h-missing">H2H fehlt — Backfill nötig</span>';
@@ -1345,6 +1394,18 @@ async function loadPreviewH2h(g){
         ftNote.style.color='var(--dim)';
       }
     }
+    // Odds feed: override line with bookie odds only if user hasn't typed anything
+    try{
+      const oddsD=await fetch(`/api/odds?home=${encodeURIComponent(g.home)}&away=${encodeURIComponent(g.away)}`).then(r=>r.json());
+      if(oddsD.found){
+        const lineEl=document.getElementById('pvline-'+g.id);
+        if(lineEl&&!lineEl.value){
+          lineEl.value=oddsD.line;
+          lineEl.title=`Odds: ${oddsD.line} (${oddsD.bookmaker||'TheOddsAPI'})`;
+          calcPreSignal(g.id);
+        }
+      }
+    }catch(e){}
   }catch(e){
     const note=document.getElementById('pvh2h-'+g.id);
     if(note)note.textContent='H2H: Fehler';
@@ -1684,7 +1745,43 @@ async function renderStats(){
         ${_sb(ft_max,'FT Max','')}
       </div>
     </div>
+
+    <div class="stats-section">
+      <div class="stats-section-title">Backfill</div>
+      <div class="backfill-row">
+        <select class="bf-select" id="bfDays">
+          <option value="7">7 Tage</option>
+          <option value="14">14 Tage</option>
+          <option value="21">21 Tage</option>
+          <option value="28">28 Tage</option>
+        </select>
+        <input class="bf-input" type="number" id="bfOffset" value="0" min="0" max="180" placeholder="Offset" title="Wie viele Tage in der Vergangenheit überspringen (0 = heute)">
+        <button class="stats-action-btn" id="bfStartBtn" onclick="startBackfill()">▶ Start Backfill</button>
+      </div>
+      <div class="backfill-progress" id="bfProgress"></div>
+    </div>
   `;
+}
+
+// ── Backfill ──
+async function startBackfill(){
+  const days=parseInt(document.getElementById('bfDays')?.value)||7;
+  const offset=parseInt(document.getElementById('bfOffset')?.value)||0;
+  const prog=document.getElementById('bfProgress');
+  const btn=document.getElementById('bfStartBtn');
+  if(prog)prog.textContent=`Sende Anfrage… (${days} Tage, Offset ${offset})`;
+  if(btn)btn.disabled=true;
+  try{
+    const r=await fetch(`/api/backfill?days=${days}&offset=${offset}`).then(res=>res.json());
+    if(prog)prog.textContent=`✓ Backfill fertig — ${r.rows_written||0} Zeilen, ${r.hz_matchups||0} HZ Matchups`;
+    // reload cache after backfill
+    await fetch('/api/reload-cache');
+    loadHealth();
+  }catch(e){
+    if(prog)prog.textContent=`✗ Fehler: ${e.message}`;
+  }finally{
+    if(btn)btn.disabled=false;
+  }
 }
 
 // ── Startup ──
@@ -2484,11 +2581,11 @@ async def get_leagues():
 async def get_live_games():
     if not API_KEY:
         return {
-            "games":  _demo_hz(),
-            "today":  _demo_today(),
-            "q3":     _demo_q3(),
-            "source": "demo",
-            "count":  2,
+            "games":  [],
+            "today":  [],
+            "q3":     [],
+            "source": "no_key",
+            "count":  0,
         }
 
     today_str = _date.today().isoformat()
@@ -2886,6 +2983,56 @@ async def reload_cache():
     }
 
 
+@app.get("/api/odds")
+async def get_odds(home: str = Query(...), away: str = Query(...)):
+    """
+    Fetch the current totals line from TheOddsAPI for a given matchup.
+    Requires ODDS_API_KEY env var. Returns {"found": false} when key is absent or no match.
+    """
+    if not ODDS_API_KEY:
+        return {"found": False, "reason": "ODDS_API_KEY not set"}
+
+    home_n = home.lower().strip()
+    away_n = away.lower().strip()
+
+    try:
+        async with httpx.AsyncClient(timeout=API_TIMEOUT) as client:
+            resp = await client.get(
+                f"{ODDS_API_BASE}/sports/basketball_euroleague/odds/",
+                params={
+                    "apiKey":   ODDS_API_KEY,
+                    "regions":  "eu",
+                    "markets":  "totals",
+                    "oddsFormat": "decimal",
+                },
+            )
+            resp.raise_for_status()
+            events = resp.json()
+
+        for ev in events:
+            h = (ev.get("home_team") or "").lower()
+            a = (ev.get("away_team") or "").lower()
+            home_match = home_n in h or h in home_n
+            away_match = away_n in a or a in away_n
+            if home_match and away_match:
+                for bm in (ev.get("bookmakers") or []):
+                    for mkt in (bm.get("markets") or []):
+                        if mkt.get("key") == "totals":
+                            for out in (mkt.get("outcomes") or []):
+                                if (out.get("name") or "").lower() == "over":
+                                    point = out.get("point")
+                                    if point is not None:
+                                        return {
+                                            "found": True,
+                                            "line":  float(point),
+                                            "bookmaker": bm.get("title", ""),
+                                        }
+        return {"found": False, "reason": "no matching game"}
+    except Exception as e:
+        log.warning("TheOddsAPI error: %s", e)
+        return {"found": False, "reason": str(e)}
+
+
 @app.get("/api/debug-stats/{game_id}")
 async def debug_stats(game_id: int):
     """
@@ -2938,51 +3085,6 @@ async def debug_sheets():
             }
     except Exception as e:
         return {"status": "connection_error", "error": str(e)}
-
-
-# ─── Demo Data ────────────────────────────────────────────────────────────────
-
-def _demo_hz() -> list:
-    return [
-        {"id": 1001, "league_id": 4, "league_name": "ACB", "status": "HT", "timer": None,
-         "home": "Real Madrid", "away": "FC Barcelona",
-         "q1_home": 28, "q1_away": 24, "q2_home": 0,  "q2_away": 0,  "q3_home": 0, "q3_away": 0,
-         "total_home": 28, "total_away": 24, "q1_total": 52, "q2_live": 0, "ht_total": 52},
-        {"id": 1002, "league_id": 120, "league_name": "TBL", "status": "Q2", "timer": 5,
-         "home": "Fenerbahce", "away": "Galatasaray",
-         "q1_home": 31, "q1_away": 27, "q2_home": 18, "q2_away": 14, "q3_home": 0, "q3_away": 0,
-         "total_home": 49, "total_away": 41, "q1_total": 58, "q2_live": 32, "ht_total": 90},
-    ]
-
-
-def _demo_q3() -> list:
-    return [
-        {"id": 2001, "league_id": 3, "league_name": "EuroLeague", "status": "Q3BT", "timer": None,
-         "home": "Olympiacos", "away": "CSKA",
-         "q1_home": 24, "q1_away": 22, "q2_home": 21, "q2_away": 24,
-         "q3_home": 22, "q3_away": 25,
-         "total_home": 67, "total_away": 71, "q1_total": 46, "q2_live": 45, "ht_total": 91},
-    ]
-
-
-def _demo_today() -> list:
-    return [
-        {"id": 3001, "league_id": 8, "league_name": "Lega A", "status": "FT", "timer": None,
-         "home": "Olimpia Milano", "away": "Virtus Bologna",
-         "q1_home": 26, "q1_away": 21, "q2_home": 22, "q2_away": 24,
-         "q3_home": 0,  "q3_away": 0,
-         "total_home": 88, "total_away": 79, "q1_total": 47, "q2_live": 46, "ht_total": 93},
-        {"id": 3002, "league_id": 4, "league_name": "ACB", "status": "NS", "timer": None,
-         "home": "Real Madrid", "away": "Valencia Basket",
-         "q1_home": 0, "q1_away": 0, "q2_home": 0, "q2_away": 0,
-         "q3_home": 0, "q3_away": 0,
-         "total_home": 0, "total_away": 0, "q1_total": 0, "q2_live": 0, "ht_total": 0},
-        {"id": 3003, "league_id": 3, "league_name": "EuroLeague", "status": "NS", "timer": None,
-         "home": "Fenerbahce", "away": "Olympiacos",
-         "q1_home": 0, "q1_away": 0, "q2_home": 0, "q2_away": 0,
-         "q3_home": 0, "q3_away": 0,
-         "total_home": 0, "total_away": 0, "q1_total": 0, "q2_live": 0, "ht_total": 0},
-    ]
 
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────
