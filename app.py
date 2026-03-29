@@ -684,6 +684,11 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;}
       <div class="empty">⟳ Klicke LIVE — zeigt Spiele am Q3 Break</div>
     </div>
 
+    <div class="sec">LIVE · Im Gang <span class="sec-badge" id="liveOtherCount">0</span></div>
+    <div class="games-wrap" id="liveOtherWrap">
+      <div class="empty">⟳ Klicke LIVE um laufende Spiele zu laden</div>
+    </div>
+
     <div class="sec">Heute · Vorschau <span class="sec-badge" id="previewCount">0</span></div>
     <div class="games-wrap" id="previewWrap">
       <div class="empty">⟳ Klicke LIVE um Vorschau zu laden</div>
@@ -879,12 +884,13 @@ async function loadLive(silent=false){
     const r=await fetch('/api/live');
     const d=await r.json();
     renderHzGames(d.games||[]);
+    renderLiveOther(d.other||[]);
     renderToday(d.today||[]);
     renderFtCandidates(d.q3||[]);
     renderFtToday(d.today||[]);
     renderPreview(d.today||[]);
-    const liveCount=(d.games||[]).length+(d.q3||[]).length;
-    setLive(d.source==='live'&&(d.count||0)>0,liveCount);
+    const totalLive=(d.games||[]).length+(d.q3||[]).length+(d.other||[]).length;
+    setLive(d.source==='live'&&totalLive>0,totalLive);
     document.getElementById('hzCount').textContent=(d.games||[]).length;
     document.getElementById('ftCount').textContent=(d.q3||[]).length;
     if(silent&&_autoRefreshTimer)_startCountdown();
@@ -1040,12 +1046,129 @@ function calcManualFt(){
   logSignal(sig,'Manuell FT');
 }
 
+// ── Badge helpers (update card signal colours without touching the signal panel) ──
+function _applyHzBadge(id,sig){
+  const cls=sig.dir==='UNDER'?'sig-under':sig.dir==='OVER'?'sig-over':'';
+  const card=document.getElementById('gc-'+id);
+  if(card)card.className=`game-card ${cls}${sig.stufe==='A'?' sig-a':''}`;
+  const badge=document.getElementById('badge-'+id);
+  if(badge){badge.className=`card-sig-badge ${sig.dir.toLowerCase()}`;badge.textContent=sig.dir;}
+  const sEl=document.getElementById('stufe-'+id);
+  if(sEl){sEl.className=`card-stufe-badge ${sig.stufe.toLowerCase()}`;sEl.textContent=sig.stufe==='C'?'SKIP':sig.stufe;}
+}
+function _applyFtBadge(id,sig){
+  const cls=sig.dir==='UNDER'?'sig-under':sig.dir==='OVER'?'sig-over':'';
+  const card=document.getElementById('ftc-'+id);
+  if(card)card.className=`ft-card ${cls}${sig.stufe==='A'?' sig-a':''}`;
+  const badge=document.getElementById('ftbadge-'+id);
+  if(badge){badge.className=`card-sig-badge ${sig.dir.toLowerCase()}`;badge.textContent=sig.dir;}
+  const sEl=document.getElementById('ftstufe-'+id);
+  if(sEl){sEl.className=`card-stufe-badge ${sig.stufe.toLowerCase()}`;sEl.textContent=sig.stufe==='C'?'SKIP':sig.stufe;}
+}
+
+// ── Auto-load: fetch H2H + stats and run engine for each card on render ──
+async function autoLoadHzCard(g){
+  const id=g.id;
+  const card=document.getElementById('gc-'+id);
+  if(!card)return;
+  const [h2hRes,statsRes]=await Promise.allSettled([
+    fetch(`/api/h2h?home=${encodeURIComponent(g.home)}&away=${encodeURIComponent(g.away)}`).then(r=>r.json()),
+    fetch(`/api/game-stats/${id}`).then(r=>r.json()),
+  ]);
+  let fouls=0,ftPct=null,fgPct=null,h2hAvg=null;
+  try{
+    const d=h2hRes.value;const note=document.getElementById('h2hn-'+id);const inp=document.getElementById('ih2h-'+id);
+    if(d.found){
+      note.textContent=`H2H Ø ${d.avg} (${d.count}x)`;note.className='h2h-note found';
+      if(inp&&!inp.value){inp.value=d.avg;const lbl=document.getElementById('h2hlbl-'+id);if(lbl)lbl.textContent=`H2H Ø (${d.count}x)`;}
+      const lineInp=document.getElementById('iline-'+id);
+      if(lineInp&&!lineInp.value){lineInp.value=d.avg;lineInp.title='H2H-Ø als Referenz';}
+      h2hAvg=d.avg;
+    }else{if(note)note.textContent='H2H: kein Eintrag';}
+  }catch(e){}
+  try{
+    const s=statsRes.value;
+    if(s.found){
+      const fi=document.getElementById('ifouls-'+id),ti=document.getElementById('ift-'+id),gi=document.getElementById('ifg-'+id);
+      if(fi&&!fi.value&&s.total_fouls>0)fi.value=s.total_fouls;
+      if(ti&&!ti.value&&s.avg_ft_pct!=null)ti.value=s.avg_ft_pct;
+      if(gi&&!gi.value&&s.avg_fg_pct!=null)gi.value=s.avg_fg_pct;
+      fouls=s.total_fouls||0;ftPct=s.avg_ft_pct;fgPct=s.avg_fg_pct;
+      const note=document.getElementById('h2hn-'+id);
+      const extra=(fouls>0?` · Fouls:${fouls}`:'')+
+                  (ftPct!=null?` · FT%:${ftPct}`:'');
+      if(note&&extra)note.textContent+=extra;
+    }
+  }catch(e){}
+  if(h2hAvg!=null){
+    const q1=parseFloat(card.dataset.q1)||0,q2=parseFloat(card.dataset.q2)||0;
+    const tmr=parseFloat(card.dataset.timer)||0,isHT=card.dataset.isht==='1';
+    const sig=hzEngine({h2h:h2hAvg,line:h2hAvg,q1,q2,timer:tmr,isHT,fouls,ft:ftPct,fg:fgPct,lineDrop:false,lineRise:false});
+    _applyHzBadge(id,sig);
+  }
+}
+async function autoLoadFtCard(g){
+  const id=g.id;
+  const card=document.getElementById('ftc-'+id);
+  if(!card)return;
+  const [h2hRes,statsRes]=await Promise.allSettled([
+    fetch(`/api/h2h?home=${encodeURIComponent(g.home)}&away=${encodeURIComponent(g.away)}&type=ft`).then(r=>r.json()),
+    fetch(`/api/game-stats/${id}`).then(r=>r.json()),
+  ]);
+  let fouls=0,homeFt=null,awayFt=null,h2hAvg=null;
+  try{
+    const d=h2hRes.value;const note=document.getElementById('fth2hn-'+id);const inp=document.getElementById('ifth2h-'+id);
+    if(d.found){
+      note.textContent=`H2H FT Ø ${d.avg} (${d.count}x)`;note.className='h2h-note found';
+      if(inp&&!inp.value){inp.value=d.avg;const ftlbl=document.getElementById('fth2hlbl-'+id);if(ftlbl)ftlbl.textContent=`H2H FT Ø (${d.count}x)`;}
+      const lineInp=document.getElementById('iftline-'+id);
+      if(lineInp&&!lineInp.value){lineInp.value=d.avg;lineInp.title='H2H-FT-Ø als Referenz';}
+      h2hAvg=d.avg;
+    }else{if(note)note.textContent='H2H FT: kein Eintrag';}
+  }catch(e){}
+  try{
+    const s=statsRes.value;
+    if(s.found){
+      const fi=document.getElementById('iftfouls-'+id),fh=document.getElementById('iftfth-'+id),fa=document.getElementById('iftfta-'+id);
+      if(fi&&!fi.value&&s.total_fouls>0)fi.value=s.total_fouls;
+      if(fh&&!fh.value&&s.home_ft_pct!=null)fh.value=s.home_ft_pct;
+      if(fa&&!fa.value&&s.away_ft_pct!=null)fa.value=s.away_ft_pct;
+      fouls=s.total_fouls||0;homeFt=s.home_ft_pct;awayFt=s.away_ft_pct;
+      const note=document.getElementById('fth2hn-'+id);
+      const extra=(fouls>0?` · Fouls:${fouls}`:'')+
+                  (homeFt!=null?` · FT%H:${homeFt}`:'')+
+                  (awayFt!=null?` · FT%G:${awayFt}`:'');
+      if(note&&extra)note.textContent+=extra;
+    }
+  }catch(e){}
+  if(h2hAvg!=null){
+    const hz=parseFloat(card.dataset.hz)||0,q3h=parseFloat(card.dataset.q3h)||0,q3a=parseFloat(card.dataset.q3a)||0;
+    const sig=ftEngine({h2h:h2hAvg,line:h2hAvg,q3h,q3a,hz,fouls,ftPctH:homeFt,ftPctA:awayFt});
+    _applyFtBadge(id,sig);
+  }
+}
+async function autoLoadOtherCard(g){
+  const el=document.getElementById('ostats-'+g.id);
+  if(!el)return;
+  try{
+    const s=await fetch(`/api/game-stats/${g.id}`).then(r=>r.json());
+    if(s.found){
+      const parts=[];
+      if(s.total_fouls>0)parts.push(`Fouls: ${s.total_fouls}`);
+      if(s.avg_ft_pct!=null)parts.push(`FT%: ${s.avg_ft_pct}`);
+      if(s.avg_fg_pct!=null)parts.push(`FG%: ${s.avg_fg_pct}`);
+      el.textContent=parts.length?parts.join(' · '):'';
+    }else{el.textContent='';}
+  }catch(e){el.textContent='';}
+}
+
 // ── HZ Cards ──
 function renderHzGames(games){
   const w=document.getElementById('gamesWrap');
   if(!games.length){w.innerHTML='<div class="empty">Keine HT/Q2 Spiele live<br><span style="font-size:9px;color:var(--dim)">EU-Ligen meist 18–22 Uhr</span></div>';return;}
   w.innerHTML=games.map(g=>hzCard(g)).join('');
   applyWatchlistUI();
+  games.forEach(g=>autoLoadHzCard(g));
 }
 function hzCard(g){
   const isHT=g.status==='HT';
@@ -1093,7 +1216,7 @@ async function selectHzCard(id,home,away){
   try{
     const d=h2hRes.value;const note=document.getElementById('h2hn-'+id);const inp=document.getElementById('ih2h-'+id);
     if(d.found){note.textContent=`H2H Ø ${d.avg} (${d.count}x)`;note.className='h2h-note found';
-      if(inp&&!inp.value){inp.value=d.avg;document.getElementById('h2hlbl-'+id).textContent=`H2H Ø (${d.count}x)`;}
+      if(inp&&!inp.value){inp.value=d.avg;const lbl=document.getElementById('h2hlbl-'+id);if(lbl)lbl.textContent=`H2H Ø (${d.count}x)`;}
       // Pre-fill bookie line with H2H avg if the user hasn't entered one yet
       const lineInp=document.getElementById('iline-'+id);
       if(lineInp&&!lineInp.value){lineInp.value=d.avg;lineInp.title='H2H-Ø als Referenz (Bookie Line überschreiben)';}
@@ -1160,6 +1283,27 @@ function calcHzCard(id,q1,q2live,timer,isHT=false){
   logSignal(sig,ctx);
 }
 
+// ── Live Other (Q1/Q3/Q4/OT — in progress, not at a trading window) ──
+function renderLiveOther(games){
+  document.getElementById('liveOtherCount').textContent=games.length;
+  const w=document.getElementById('liveOtherWrap');
+  if(!games.length){w.innerHTML='<div class="empty">Keine weiteren Live-Spiele</div>';return;}
+  w.innerHTML=games.map(g=>{
+    const st=g.status||'?';
+    return`<div class="today-card"><div class="card-stripe" style="background:var(--green)"></div>
+      <div class="today-body">
+        <div class="today-top"><span class="today-league">${g.league_name}</span><span class="today-status" style="color:var(--green)">${st}${g.timer?' '+g.timer+'′':''}</span></div>
+        <div class="today-teams">
+          <div class="today-team">${g.home}</div>
+          <div><div class="today-score">${g.total_home}–${g.total_away}</div><div class="today-q">Q1:${g.q1_total} Q2:${g.q2_live??'—'}</div></div>
+          <div class="today-team away">${g.away}</div>
+        </div>
+        <div class="today-q" id="ostats-${g.id}" style="color:var(--dim);margin-top:2px">…</div>
+      </div></div>`;
+  }).join('');
+  games.forEach(g=>autoLoadOtherCard(g));
+}
+
 // ── Today list ──
 function renderToday(games){
   const w=document.getElementById('todayWrap');
@@ -1184,6 +1328,7 @@ function renderFtCandidates(games){
   if(!games.length){w.innerHTML='<div class="empty">Keine Spiele am Q3 Break</div>';return;}
   w.innerHTML=games.map(g=>ftCard(g)).join('');
   applyWatchlistUI();
+  games.forEach(g=>autoLoadFtCard(g));
 }
 function ftCard(g){
   const q3tot=(g.q3_home||0)+(g.q3_away||0);
@@ -1232,7 +1377,7 @@ async function selectFtCard(id,home,away){
     if(d.found){
       note.textContent=`H2H FT Ø ${d.avg} (${d.count}x)`;note.className='h2h-note found';
       const inp=document.getElementById('ifth2h-'+id);
-      if(inp&&!inp.value){inp.value=d.avg;document.getElementById('fth2hlbl-'+id).textContent=`H2H FT Ø (${d.count}x)`;}
+      if(inp&&!inp.value){inp.value=d.avg;const ftlbl=document.getElementById('fth2hlbl-'+id);if(ftlbl)ftlbl.textContent=`H2H FT Ø (${d.count}x)`;}
       // Pre-fill bookie line with H2H FT avg if the user hasn't entered one yet
       const lineInp=document.getElementById('iftline-'+id);
       if(lineInp&&!lineInp.value){lineInp.value=d.avg;lineInp.title='H2H-FT-Ø als Referenz (Bookie Line überschreiben)';}
@@ -2631,12 +2776,13 @@ async def get_live_games():
         if isinstance(r, list):
             today_all.extend(r)
 
-    log.info("Live poll done — HZ:%d  Q3BT:%d  today:%d",
-             len(live_hz), len(live_q3), len(today_all))
+    log.info("Live poll done — HZ:%d  Q3BT:%d  other:%d  today:%d",
+             len(live_hz), len(live_q3), len(live_other), len(today_all))
 
     return {
         "games":  live_hz,
         "q3":     live_q3,
+        "other":  live_other,
         "today":  today_all[:TODAY_GAMES_LIMIT],
         "source": "live",
         "count":  len(live_hz),
