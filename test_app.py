@@ -675,3 +675,53 @@ class TestLiveScanEndpoint:
         assert data["telegram_sent"] is False
         assert data["source"] == "no_api_key"
 
+
+class TestStatsEndpoint:
+    def test_returns_200(self, client):
+        r = client.get("/api/stats")
+        assert r.status_code == 200
+
+    def test_response_fields(self, client):
+        r = client.get("/api/stats")
+        data = r.json()
+        for field in (
+            "hz_matchups", "ft_matchups", "hz_games", "ft_games",
+            "hz_avg", "ft_avg", "hz_min", "hz_max", "ft_min", "ft_max",
+            "api_key_set", "sheets_configured", "telegram_configured",
+        ):
+            assert field in data
+
+    def test_empty_cache_returns_none_averages(self, client):
+        # With no data in H2H caches, averages should be None
+        from app import _h2h_cache, _ft_h2h_cache
+        orig_hz = dict(_h2h_cache)
+        orig_ft = dict(_ft_h2h_cache)
+        _h2h_cache.clear()
+        _ft_h2h_cache.clear()
+        try:
+            r = client.get("/api/stats")
+            data = r.json()
+            assert data["hz_avg"] is None
+            assert data["ft_avg"] is None
+            assert data["hz_matchups"] == 0
+            assert data["ft_matchups"] == 0
+        finally:
+            _h2h_cache.update(orig_hz)
+            _ft_h2h_cache.update(orig_ft)
+
+    def test_populated_cache_returns_averages(self, client):
+        from app import _h2h_cache, _ft_h2h_cache, _matchup_key
+        key = _matchup_key("StatsHome", "StatsAway")
+        _h2h_cache[key] = [90.0, 92.0, 88.0]
+        _ft_h2h_cache[key] = [180.0, 184.0]
+        try:
+            r = client.get("/api/stats")
+            data = r.json()
+            assert data["hz_matchups"] >= 1
+            assert data["ft_matchups"] >= 1
+            assert data["hz_avg"] is not None
+            assert data["ft_avg"] is not None
+        finally:
+            del _h2h_cache[key]
+            del _ft_h2h_cache[key]
+

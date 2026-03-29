@@ -525,6 +525,91 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;}
   .sig-dir{font-size:36px;}
   .sig-log-section{max-height:140px;}
 }
+
+/* ── Stats Modal ── */
+.stats-overlay{
+  display:none;position:fixed;inset:0;z-index:500;
+  background:rgba(0,0,0,.75);backdrop-filter:blur(3px);
+  align-items:flex-start;justify-content:center;
+  padding-top:calc(var(--topbar-h) + var(--statusbar-h) + 16px);
+}
+.stats-overlay.open{display:flex;}
+.stats-modal{
+  background:var(--s1);border:1px solid var(--border2);
+  width:min(700px,96vw);
+  max-height:calc(100vh - var(--topbar-h) - var(--statusbar-h) - 32px);
+  display:flex;flex-direction:column;overflow:hidden;
+}
+.stats-modal-header{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:12px 16px;border-bottom:1px solid var(--border);flex-shrink:0;
+}
+.stats-modal-title{
+  font-family:'Barlow Condensed',sans-serif;font-weight:900;
+  font-size:16px;letter-spacing:3px;color:var(--white);
+}
+.stats-close{
+  background:none;border:none;cursor:pointer;
+  color:var(--dim);font-size:18px;padding:2px 8px;line-height:1;
+}
+.stats-close:hover{color:var(--over);}
+.stats-body{
+  overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:12px;
+  scrollbar-width:thin;scrollbar-color:var(--border2) transparent;
+}
+.stats-body::-webkit-scrollbar{width:4px;}
+.stats-body::-webkit-scrollbar-thumb{background:var(--border2);}
+.stats-section{background:var(--s2);border:1px solid var(--border);padding:12px;}
+.stats-section-title{
+  font-size:9px;letter-spacing:3px;text-transform:uppercase;
+  color:var(--dim);margin-bottom:10px;
+}
+.stats-grid{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:4px;
+}
+.stat-box{background:var(--bg);border:1px solid var(--border);padding:8px;text-align:center;}
+.stat-box-val{
+  font-family:'Barlow Condensed',sans-serif;
+  font-size:22px;font-weight:700;color:var(--white);
+}
+.stat-box-val.green{color:var(--green);}
+.stat-box-val.red{color:var(--over);}
+.stat-box-val.gold{color:var(--gold);}
+.stat-box-val.blue{color:var(--under);}
+.stat-box-lbl{
+  font-size:7px;letter-spacing:1px;text-transform:uppercase;
+  color:var(--dim);margin-top:3px;
+}
+.tracked-list{
+  display:flex;flex-direction:column;gap:2px;
+  max-height:220px;overflow-y:auto;
+  scrollbar-width:thin;scrollbar-color:var(--border2) transparent;
+}
+.tracked-entry{
+  display:flex;align-items:center;gap:5px;
+  padding:5px 7px;background:var(--bg);border:1px solid var(--border);font-size:9px;
+}
+.tracked-dir{font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:11px;letter-spacing:1px;flex-shrink:0;}
+.tracked-dir.under{color:var(--under);}
+.tracked-dir.over{color:var(--over);}
+.tracked-dir.skip{color:var(--dim);}
+.tracked-result-btns{margin-left:auto;display:flex;gap:3px;flex-shrink:0;}
+.result-btn{
+  background:none;border:1px solid var(--border2);color:var(--dim);
+  font-size:8px;letter-spacing:.5px;padding:2px 6px;cursor:pointer;
+  font-family:'Barlow',sans-serif;text-transform:uppercase;
+}
+.result-btn:hover{border-color:var(--green);color:var(--green);}
+.result-btn.won{background:rgba(45,198,83,.15);border-color:var(--green);color:var(--green);}
+.result-btn.lost{background:rgba(230,57,70,.15);border-color:var(--over);color:var(--over);}
+.result-btn.void{background:rgba(61,64,85,.3);border-color:var(--dim2);color:var(--dim2);}
+.stats-action-row{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;}
+.stats-action-btn{
+  background:none;border:1px solid var(--border2);color:var(--dim);
+  font-size:9px;letter-spacing:1px;padding:4px 12px;cursor:pointer;
+  font-family:'Barlow',sans-serif;text-transform:uppercase;
+}
+.stats-action-btn:hover{border-color:var(--over);color:var(--over);}
 </style>
 </head>
 <body>
@@ -541,6 +626,7 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;}
   </div>
   <button class="icon-btn" id="refreshBtn" onclick="loadLive()">⟳ LIVE</button>
   <button class="icon-btn" id="tgTestBtn" onclick="testTelegram()" title="Telegram Test-Nachricht senden">📱 TG</button>
+  <button class="icon-btn" id="statsBtn" onclick="toggleStats()" title="Statistiken & P&L Tracking">📊 STATS</button>
   <button class="icon-btn" id="notifBtn" onclick="toggleNotif()" title="Browser-Benachrichtigungen ein/aus">🔕 AUS</button>
   <button class="icon-btn" id="soundBtn" onclick="toggleSound()" title="Sound-Alert ein/aus">🔇 AUS</button>
 </div>
@@ -663,6 +749,19 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;}
 
   </div><!-- /right-panel -->
 </div><!-- /app-shell -->
+
+<!-- Stats Modal -->
+<div class="stats-overlay" id="statsOverlay" onclick="if(event.target===this)toggleStats()">
+  <div class="stats-modal">
+    <div class="stats-modal-header">
+      <span class="stats-modal-title">📊 STATISTIKEN</span>
+      <button class="stats-close" onclick="toggleStats()">✕</button>
+    </div>
+    <div class="stats-body" id="statsBody">
+      <div class="empty" style="font-size:11px;padding:28px;">Lade Statistiken…</div>
+    </div>
+  </div>
+</div>
 
 <script>
 // switchTab is kept for backwards-compat but does nothing in new layout
@@ -1282,12 +1381,20 @@ function _tsNow(){
   const d=new Date();
   return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
 }
+function _genId(){return Date.now().toString(36)+Math.random().toString(36).slice(2,5);}
 function logSignal(sig,ctx=''){
-  const entry={ts:_tsNow(),dir:sig.dir,stufe:sig.stufe,type:sig.type||'HZ',buf:sig.buffer,ctx};
+  const id=_genId();
+  const entry={id,ts:_tsNow(),dir:sig.dir,stufe:sig.stufe,type:sig.type||'HZ',buf:sig.buffer,ctx};
   _signalLog.unshift(entry);
   if(_signalLog.length>_MAX_LOG)_signalLog.length=_MAX_LOG;
   document.getElementById('logCount').textContent=_signalLog.length;
   renderSignalLog();
+  // Auto-track all non-SKIP signals for P&L recording
+  if(sig.dir!=='SKIP'){
+    const tracked=_loadTracked();
+    tracked.push({...entry,result:null});
+    _saveTracked(tracked);
+  }
   if(sig.dir!=='SKIP'){
     _doNotify(sig,ctx);
     _doTabTitle(sig);
@@ -1405,6 +1512,144 @@ function _doTabTitle(sig){
   document.title=`${icon} ${sig.dir} · HZ/FT Trading`;
   clearTimeout(_tabRestoreTimer);
   _tabRestoreTimer=setTimeout(()=>{document.title='HZ / FT Trading';},12000);
+}
+
+// ── Statistics & P&L Tracking ──
+const TRACKED_KEY='hz_tracked_signals';
+function _loadTracked(){
+  try{return JSON.parse(localStorage.getItem(TRACKED_KEY)||'[]');}
+  catch(e){return [];}
+}
+function _saveTracked(arr){
+  // Cap at 500 entries to stay within typical localStorage size limits (~5MB)
+  try{localStorage.setItem(TRACKED_KEY,JSON.stringify(arr.slice(-500)));}
+  catch(e){}
+}
+function markResult(id,result){
+  const arr=_loadTracked();
+  const e=arr.find(x=>x.id===id);
+  if(!e)return;
+  e.result=(e.result===result)?null:result; // toggle off if same
+  _saveTracked(arr);
+  renderStats();
+}
+function clearTracked(){
+  if(!confirm('Tracking-Daten wirklich löschen?'))return;
+  localStorage.removeItem(TRACKED_KEY);
+  renderStats();
+}
+function toggleStats(){
+  const ov=document.getElementById('statsOverlay');
+  ov.classList.toggle('open');
+  if(ov.classList.contains('open'))renderStats();
+}
+async function renderStats(){
+  const body=document.getElementById('statsBody');
+  if(!body)return;
+  const tracked=_loadTracked();
+  const session=[..._signalLog];
+
+  // Session summary
+  const sDir={UNDER:0,OVER:0,SKIP:0};
+  const sStufe={A:0,B:0,C:0};
+  const sType={HZ:0,FT:0};
+  for(const s of session){
+    sDir[s.dir]=(sDir[s.dir]||0)+1;
+    sStufe[s.stufe]=(sStufe[s.stufe]||0)+1;
+    sType[s.type]=(sType[s.type]||0)+1;
+  }
+
+  // P&L stats
+  const won=tracked.filter(t=>t.result==='WON').length;
+  const lost=tracked.filter(t=>t.result==='LOST').length;
+  const voided=tracked.filter(t=>t.result==='VOID').length;
+  const pending=tracked.filter(t=>!t.result).length;
+  const decided=won+lost;
+  const winRate=decided>0?(won/decided*100).toFixed(1)+'%':'—';
+  const winClass=decided>0?(won/decided>=0.5?'green':'red'):'';
+
+  const aList=tracked.filter(t=>t.stufe==='A');
+  const aWon=aList.filter(t=>t.result==='WON').length;
+  const aLost=aList.filter(t=>t.result==='LOST').length;
+  const aDec=aWon+aLost;
+  const aRate=aDec>0?(aWon/aDec*100).toFixed(1)+'%':'—';
+  const aClass=aDec>0?(aWon/aDec>=0.5?'green':'red'):'';
+
+  // Backend H2H stats
+  let hz_mu='—',ft_mu='—',hz_n='—',ft_n='—',hz_avg='—',ft_avg='—',hz_min='—',hz_max='—',ft_min='—',ft_max='—';
+  try{
+    const st=await fetch('/api/stats').then(r=>r.json());
+    hz_mu=st.hz_matchups??'—';ft_mu=st.ft_matchups??'—';
+    hz_n=st.hz_games??'—';ft_n=st.ft_games??'—';
+    hz_avg=st.hz_avg??'—';ft_avg=st.ft_avg??'—';
+    hz_min=st.hz_min??'—';hz_max=st.hz_max??'—';
+    ft_min=st.ft_min??'—';ft_max=st.ft_max??'—';
+  }catch(e){}
+
+  const _sb=(val,lbl,cls='')=>`<div class="stat-box"><div class="stat-box-val ${cls}">${val}</div><div class="stat-box-lbl">${lbl}</div></div>`;
+
+  const trackedHtml=tracked.length===0
+    ?'<div class="empty" style="font-size:10px;padding:12px;">Noch keine Signale verfolgt — werden automatisch beim Berechnen hinzugefügt</div>'
+    :[...tracked].reverse().map(t=>`<div class="tracked-entry">
+        <span style="color:var(--dim);min-width:38px;flex-shrink:0">${t.ts||''}</span>
+        <span class="tracked-dir ${(t.dir||'').toLowerCase()}">${t.dir||'?'}</span>
+        <span style="font-size:8px;color:var(--dim2);flex-shrink:0">ST-${t.stufe||'?'}</span>
+        <span style="font-size:8px;color:var(--dim2);flex-shrink:0">${t.type||'HZ'}</span>
+        ${t.buf!=null?`<span style="color:var(--text);flex-shrink:0">${t.buf>=0?'+':''}${(+t.buf).toFixed(1)}</span>`:''}
+        <span style="color:var(--dim);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:8px">${t.ctx||''}</span>
+        <div class="tracked-result-btns">
+          <button class="result-btn ${t.result==='WON'?'won':''}" onclick="markResult('${t.id}','WON')">WON</button>
+          <button class="result-btn ${t.result==='LOST'?'lost':''}" onclick="markResult('${t.id}','LOST')">LOST</button>
+          <button class="result-btn ${t.result==='VOID'?'void':''}" onclick="markResult('${t.id}','VOID')">VOID</button>
+        </div>
+      </div>`).join('');
+
+  body.innerHTML=`
+    <div class="stats-section">
+      <div class="stats-section-title">Session · Signale</div>
+      <div class="stats-grid">
+        ${_sb(session.length,'Gesamt')}
+        ${_sb(sDir.UNDER||0,'UNDER','blue')}
+        ${_sb(sDir.OVER||0,'OVER','red')}
+        ${_sb(sStufe.A||0,'Stufe A','green')}
+        ${_sb(sStufe.B||0,'Stufe B','gold')}
+        ${_sb(sStufe.C||0,'Skip/C','')}
+        ${_sb(sType.HZ||0,'HZ','')}
+        ${_sb(sType.FT||0,'FT','')}
+      </div>
+    </div>
+
+    <div class="stats-section">
+      <div class="stats-section-title">P&L · Tracking (persistent)</div>
+      <div class="stats-grid" style="margin-bottom:10px">
+        ${_sb(tracked.length,'Verfolgt','')}
+        ${_sb(won,'Gewonnen','green')}
+        ${_sb(lost,'Verloren','red')}
+        ${_sb(voided,'Void','')}
+        ${_sb(pending,'Ausstehend','gold')}
+        ${_sb(winRate,'Win-Rate',winClass)}
+        ${_sb(aRate,'Win-Rate A',aClass)}
+      </div>
+      <div class="tracked-list">${trackedHtml}</div>
+      ${tracked.length>0?`<div class="stats-action-row"><button class="stats-action-btn" onclick="clearTracked()">✕ Tracking leeren</button></div>`:''}
+    </div>
+
+    <div class="stats-section">
+      <div class="stats-section-title">H2H Datenbank</div>
+      <div class="stats-grid">
+        ${_sb(hz_mu,'HZ Matchups','')}
+        ${_sb(ft_mu,'FT Matchups','')}
+        ${_sb(hz_n,'HZ Spiele','')}
+        ${_sb(ft_n,'FT Spiele','')}
+        ${_sb(hz_avg,'HZ Ø Total','gold')}
+        ${_sb(ft_avg,'FT Ø Total','gold')}
+        ${_sb(hz_min,'HZ Min','')}
+        ${_sb(hz_max,'HZ Max','')}
+        ${_sb(ft_min,'FT Min','')}
+        ${_sb(ft_max,'FT Max','')}
+      </div>
+    </div>
+  `;
 }
 
 // ── Startup ──
@@ -2012,6 +2257,31 @@ async def health():
     }
 
 
+@app.get("/api/stats")
+async def get_stats():
+    """
+    Aggregated statistics for the H2H cache and system status.
+    Used by the frontend Statistics panel.
+    """
+    hz_vals = [v for vals in _h2h_cache.values() for v in vals]
+    ft_vals = [v for vals in _ft_h2h_cache.values() for v in vals]
+    return {
+        "hz_matchups":         len(_h2h_cache),
+        "ft_matchups":         len(_ft_h2h_cache),
+        "hz_games":            len(hz_vals),
+        "ft_games":            len(ft_vals),
+        "hz_avg":              round(sum(hz_vals) / len(hz_vals), 1) if hz_vals else None,
+        "ft_avg":              round(sum(ft_vals) / len(ft_vals), 1) if ft_vals else None,
+        "hz_min":              round(min(hz_vals), 1) if hz_vals else None,
+        "hz_max":              round(max(hz_vals), 1) if hz_vals else None,
+        "ft_min":              round(min(ft_vals), 1) if ft_vals else None,
+        "ft_max":              round(max(ft_vals), 1) if ft_vals else None,
+        "api_key_set":         bool(API_KEY),
+        "sheets_configured":   bool(SHEETS_ID and CREDS_JSON),
+        "telegram_configured": bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID),
+    }
+
+
 @app.get("/api/leagues")
 async def get_leagues():
     return {
@@ -2338,6 +2608,8 @@ async def live_scan():
         "telegram_sent": sent,
         "source":        "live",
     }
+
+@app.get("/api/backfill")
 async def backfill(
     days:   int = Query(default=7, ge=1, le=BACKFILL_MAX_DAYS),
     offset: int = Query(default=0, ge=0, le=180),
