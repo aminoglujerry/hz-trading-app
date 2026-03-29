@@ -684,6 +684,11 @@ body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;}
       <div class="empty">⟳ Klicke LIVE — zeigt Spiele am Q3 Break</div>
     </div>
 
+    <div class="sec">LIVE · Im Gang <span class="sec-badge" id="liveOtherCount">0</span></div>
+    <div class="games-wrap" id="liveOtherWrap">
+      <div class="empty">⟳ Klicke LIVE um laufende Spiele zu laden</div>
+    </div>
+
     <div class="sec">Heute · Vorschau <span class="sec-badge" id="previewCount">0</span></div>
     <div class="games-wrap" id="previewWrap">
       <div class="empty">⟳ Klicke LIVE um Vorschau zu laden</div>
@@ -879,12 +884,13 @@ async function loadLive(silent=false){
     const r=await fetch('/api/live');
     const d=await r.json();
     renderHzGames(d.games||[]);
+    renderLiveOther(d.other||[]);
     renderToday(d.today||[]);
     renderFtCandidates(d.q3||[]);
     renderFtToday(d.today||[]);
     renderPreview(d.today||[]);
-    const liveCount=(d.games||[]).length+(d.q3||[]).length;
-    setLive(d.source==='live'&&(d.count||0)>0,liveCount);
+    const totalLive=(d.games||[]).length+(d.q3||[]).length+(d.other||[]).length;
+    setLive(d.source==='live'&&totalLive>0,totalLive);
     document.getElementById('hzCount').textContent=(d.games||[]).length;
     document.getElementById('ftCount').textContent=(d.q3||[]).length;
     if(silent&&_autoRefreshTimer)_startCountdown();
@@ -1158,6 +1164,25 @@ function calcHzCard(id,q1,q2live,timer,isHT=false){
   const teams=card?.querySelectorAll('.card-team');
   const ctx=teams&&teams.length>=2?teams[0].textContent+' / '+teams[1].textContent:'Spiel #'+id;
   logSignal(sig,ctx);
+}
+
+// ── Live Other (Q1/Q3/Q4/OT — in progress, not at a trading window) ──
+function renderLiveOther(games){
+  document.getElementById('liveOtherCount').textContent=games.length;
+  const w=document.getElementById('liveOtherWrap');
+  if(!games.length){w.innerHTML='<div class="empty">Keine weiteren Live-Spiele</div>';return;}
+  w.innerHTML=games.map(g=>{
+    const st=g.status||'?';
+    return`<div class="today-card"><div class="card-stripe" style="background:var(--green)"></div>
+      <div class="today-body">
+        <div class="today-top"><span class="today-league">${g.league_name}</span><span class="today-status" style="color:var(--green)">${st}${g.timer?' '+g.timer+'′':''}</span></div>
+        <div class="today-teams">
+          <div class="today-team">${g.home}</div>
+          <div><div class="today-score">${g.total_home}–${g.total_away}</div><div class="today-q">Q1:${g.q1_total} Q2:${g.q2_live||'—'}</div></div>
+          <div class="today-team away">${g.away}</div>
+        </div>
+      </div></div>`;
+  }).join('');
 }
 
 // ── Today list ──
@@ -2631,12 +2656,13 @@ async def get_live_games():
         if isinstance(r, list):
             today_all.extend(r)
 
-    log.info("Live poll done — HZ:%d  Q3BT:%d  today:%d",
-             len(live_hz), len(live_q3), len(today_all))
+    log.info("Live poll done — HZ:%d  Q3BT:%d  other:%d  today:%d",
+             len(live_hz), len(live_q3), len(live_other), len(today_all))
 
     return {
         "games":  live_hz,
         "q3":     live_q3,
+        "other":  live_other,
         "today":  today_all[:TODAY_GAMES_LIMIT],
         "source": "live",
         "count":  len(live_hz),
