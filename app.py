@@ -77,6 +77,12 @@ SHEETS_COLS_INIT      = 10
 H2H_HZ_MAX            = 400    # sanity cap for halftime total (any value above is corrupt)
 H2H_FT_MAX            = 800    # sanity cap for full-game total
 
+# ─── Auto-Scan (background signal loop) ──────────────────────────────────────
+AUTO_SCAN_INTERVAL    = int(os.getenv("AUTO_SCAN_INTERVAL", "120"))  # seconds between scan cycles
+H2H_MIN_SAMPLES       = 3      # minimum H2H entries required to auto-compute a signal
+AUTO_SENT_TTL         = 1500   # seconds before re-sending a signal for the same game (25 min)
+AUTO_SCAN_STUFE       = os.getenv("AUTO_SCAN_STUFE", "A")  # only send signals at this stufe or higher
+
 SHEETS_HEADER = ["date", "home", "away", "league",
                  "q1_total", "q2_total", "ht_total", "ft_total"]
 
@@ -126,6 +132,7 @@ _h2h_cache:        dict        = {}           # matchup_key → [ht_total, …]
 _ft_h2h_cache:     dict        = {}           # matchup_key → [ft_total, …]
 _seen_ft_ids:      OrderedDict = OrderedDict() # FIFO set, capped at SEEN_FT_IDS_MAX
 _game_stats_cache: OrderedDict = OrderedDict() # game_id → (timestamp, result), FIFO-capped
+_auto_sent:        dict        = {}           # (game_id, type) → timestamp; dedup for auto-signals
 _ws                             = None         # gspread Worksheet (lazy init)
 _api_semaphore: Optional[asyncio.Semaphore]   = None  # init in lifespan
 _http_client:   Optional[httpx.AsyncClient]   = None  # persistent — reused across all API calls
@@ -143,15 +150,18 @@ async def lifespan(app_: FastAPI):
         timeout=API_TIMEOUT,
         limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
     )
-    task = asyncio.create_task(_scheduler_loop())
-    log.info("🚀 App started — scheduler interval: %ds, concurrency: %d",
-             SCHEDULER_INTERVAL, LIVE_API_CONCURRENCY)
+    scheduler_task  = asyncio.create_task(_scheduler_loop())
+    auto_scan_task  = asyncio.create_task(_auto_scan_loop())
+    log.info("🚀 App started — scheduler interval: %ds, auto-scan interval: %ds, concurrency: %d",
+             SCHEDULER_INTERVAL, AUTO_SCAN_INTERVAL, LIVE_API_CONCURRENCY)
     yield
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
+    scheduler_task.cancel()
+    auto_scan_task.cancel()
+    for t in (scheduler_task, auto_scan_task):
+        try:
+            await t
+        except asyncio.CancelledError:
+            pass
     await _http_client.aclose()
     log.info("App shutdown complete")
 
@@ -1007,7 +1017,7 @@ function hzCard(g){
   const isHT=g.status==='HT';
   const timer=g.timer||0;
   const label=isHT?'HALBZEIT':`Q2 · ${timer}′`;
-  return`<div class="game-card" id="gc-${g.id}" onclick="selectHzCard(${g.id},${JSON.stringify(g.home).replace(/"/g,'&quot;')},${JSON.stringify(g.away).replace(/"/g,'&quot;')})">
+  return`<div class="game-card" id="gc-${g.id}" data-q1="${g.q1_total}" data-q2="${g.q2_live||0}" data-timer="${timer}" data-isht="${isHT?'1':'0'}" onclick="selectHzCard(${g.id},${JSON.stringify(g.home).replace(/"/g,'&quot;')},${JSON.stringify(g.away).replace(/"/g,'&quot;')})">
     <div class="card-stripe"></div>
     <div class="card-body">
       <div class="card-top"><span class="card-league">${g.league_name}</span><div style="display:flex;align-items:center;gap:5px;"><span class="wl-star" id="wl-${g.id}" data-id="${g.id}">★</span><span class="card-status">${label}</span></div></div>
@@ -1045,11 +1055,16 @@ async function selectHzCard(id,home,away){
     fetch(`/api/h2h?home=${encodeURIComponent(home)}&away=${encodeURIComponent(away)}`).then(r=>r.json()),
     fetch(`/api/game-stats/${id}`).then(r=>r.json()),
   ]);
+  let h2hAvg=null;
   try{
     const d=h2hRes.value;const note=document.getElementById('h2hn-'+id);const inp=document.getElementById('ih2h-'+id);
     if(d.found){note.textContent=`H2H Ø ${d.avg} (${d.count}x)`;note.className='h2h-note found';
-      if(inp&&!inp.value){inp.value=d.avg;document.getElementById('h2hlbl-'+id).textContent=`H2H Ø (${d.count}x)`;}}
-    else{note.textContent='H2H: kein Eintrag';note.className='h2h-note';}
+      if(inp&&!inp.value){inp.value=d.avg;document.getElementById('h2hlbl-'+id).textContent=`H2H Ø (${d.count}x)`;}
+      // Pre-fill bookie line with H2H avg if the user hasn't entered one yet
+      const lineInp=document.getElementById('iline-'+id);
+      if(lineInp&&!lineInp.value){lineInp.value=d.avg;lineInp.title='H2H-Ø als Referenz (Bookie Line überschreiben)';}
+      h2hAvg=d.avg;
+    }else{note.textContent='H2H: kein Eintrag';note.className='h2h-note';}
   }catch(e){document.getElementById('h2hn-'+id).textContent='H2H: Fehler';}
   try{
     const s=statsRes.value;
@@ -1064,6 +1079,14 @@ async function selectHzCard(id,home,away){
       if(note&&extra)note.textContent+=extra;
     }
   }catch(e){}
+  // Auto-calculate signal as soon as H2H (used as reference line) is available
+  if(h2hAvg&&card){
+    const q1=parseFloat(card.dataset.q1)||0;
+    const q2=parseFloat(card.dataset.q2)||0;
+    const tmr=parseFloat(card.dataset.timer)||0;
+    const isHT=card.dataset.isht==='1';
+    calcHzCard(id,q1,q2,tmr,isHT);
+  }
 }
 function calcHzCard(id,q1,q2live,timer,isHT=false){
   const line=parseFloat(document.getElementById('iline-'+id).value);
@@ -1118,7 +1141,7 @@ function renderFtCandidates(games){
 function ftCard(g){
   const q3tot=(g.q3_home||0)+(g.q3_away||0);
   const gap=Math.abs((g.q3_home||0)-(g.q3_away||0));
-  return`<div class="ft-card" id="ftc-${g.id}" onclick="selectFtCard(${g.id},${JSON.stringify(g.home).replace(/"/g,'&quot;')},${JSON.stringify(g.away).replace(/"/g,'&quot;')})">
+  return`<div class="ft-card" id="ftc-${g.id}" data-hz="${g.ht_total}" data-q3h="${g.q3_home||0}" data-q3a="${g.q3_away||0}" onclick="selectFtCard(${g.id},${JSON.stringify(g.home).replace(/"/g,'&quot;')},${JSON.stringify(g.away).replace(/"/g,'&quot;')})">
     <div class="card-stripe"></div>
     <div class="ft-body">
       <div class="card-top"><span class="card-league">${g.league_name}</span><div style="display:flex;align-items:center;gap:5px;"><span class="wl-star" id="wl-${g.id}" data-id="${g.id}">★</span><span class="card-status">Q3 BREAK</span></div></div>
@@ -1156,12 +1179,17 @@ async function selectFtCard(id,home,away){
     fetch(`/api/h2h?home=${encodeURIComponent(home)}&away=${encodeURIComponent(away)}&type=ft`).then(r=>r.json()),
     fetch(`/api/game-stats/${id}`).then(r=>r.json()),
   ]);
+  let h2hAvg=null;
   try{
     const d=h2hRes.value;const note=document.getElementById('fth2hn-'+id);
     if(d.found){
       note.textContent=`H2H FT Ø ${d.avg} (${d.count}x)`;note.className='h2h-note found';
       const inp=document.getElementById('ifth2h-'+id);
       if(inp&&!inp.value){inp.value=d.avg;document.getElementById('fth2hlbl-'+id).textContent=`H2H FT Ø (${d.count}x)`;}
+      // Pre-fill bookie line with H2H FT avg if the user hasn't entered one yet
+      const lineInp=document.getElementById('iftline-'+id);
+      if(lineInp&&!lineInp.value){lineInp.value=d.avg;lineInp.title='H2H-FT-Ø als Referenz (Bookie Line überschreiben)';}
+      h2hAvg=d.avg;
     }else{note.textContent='H2H FT: kein Eintrag';note.className='h2h-note';}
   }catch(e){}
   try{
@@ -1180,6 +1208,13 @@ async function selectFtCard(id,home,away){
       if(note&&extra)note.textContent+=extra;
     }
   }catch(e){}
+  // Auto-calculate signal as soon as H2H FT (used as reference line) is available
+  if(h2hAvg&&card){
+    const hz=parseFloat(card.dataset.hz)||0;
+    const q3h=parseFloat(card.dataset.q3h)||0;
+    const q3a=parseFloat(card.dataset.q3a)||0;
+    calcFtCard(id,hz,q3h,q3a);
+  }
 }
 function calcFtCard(id,hz,q3h,q3a){
   const line=parseFloat(document.getElementById('iftline-'+id).value);
@@ -2188,6 +2223,159 @@ async def _scheduler_loop() -> None:
         await asyncio.sleep(SCHEDULER_INTERVAL)
 
 
+# ─── Automated Signal Scan ────────────────────────────────────────────────────
+
+async def _auto_signal_for_game(g: dict, sig_type: str) -> Optional[dict]:
+    """
+    Compute a signal for a live game using the H2H average as the reference line.
+
+    Returns a signal dict (same shape as _hz_engine / _ft_engine output) or None
+    when there is insufficient H2H data or the game data is incomplete.
+    """
+    home = g["home"]
+    away = g["away"]
+    key  = _matchup_key(home, away)
+
+    if sig_type == "hz":
+        vals = _h2h_cache.get(key, [])
+        if len(vals) < H2H_MIN_SAMPLES:
+            return None
+        line = round(sum(vals) / len(vals), 1)
+
+        stats   = await get_game_stats(g["id"])
+        fouls   = stats.get("total_fouls", 0) if stats.get("found") else 0
+        ft_pct  = stats.get("avg_ft_pct")     if stats.get("found") else None
+        fg_pct  = stats.get("avg_fg_pct")     if stats.get("found") else None
+        is_ht   = g.get("status") == "HT"
+        timer   = float(g.get("timer") or 0)
+
+        return _hz_engine(
+            h2h=line, line=line,
+            q1=float(g.get("q1_total", 0)),
+            q2=float(g.get("q2_live", 0)),
+            timer=timer, fouls=fouls, ft_pct=ft_pct, fg_pct=fg_pct,
+            line_drop=False, line_rise=False, is_ht=is_ht,
+        )
+
+    else:  # ft
+        vals = _ft_h2h_cache.get(key, [])
+        if len(vals) < H2H_MIN_SAMPLES:
+            return None
+        line = round(sum(vals) / len(vals), 1)
+
+        stats      = await get_game_stats(g["id"])
+        fouls      = stats.get("total_fouls", 0) if stats.get("found") else 0
+        home_ft    = stats.get("home_ft_pct")    if stats.get("found") else None
+        away_ft    = stats.get("away_ft_pct")    if stats.get("found") else None
+
+        return _ft_engine(
+            h2h=line, line=line,
+            q3h=float(g.get("q3_home", 0)),
+            q3a=float(g.get("q3_away", 0)),
+            hz=float(g.get("ht_total", 0)),
+            fouls=fouls, ft_pct_h=home_ft, ft_pct_a=away_ft,
+        )
+
+
+async def _auto_scan_once() -> int:
+    """
+    One auto-scan cycle: compute signals for all live HZ / Q3BT games.
+
+    For each game the H2H average from the cache is used as the reference line.
+    Only Stufe-A (or the configured AUTO_SCAN_STUFE) signals are sent via Telegram
+    and each game is rate-limited to one notification per AUTO_SENT_TTL seconds.
+
+    Returns the number of Telegram messages successfully sent.
+    """
+    if not API_KEY:
+        return 0
+
+    now = time()
+
+    results = await asyncio.gather(
+        *[_fetch_live_for_league(lid, name, season)
+          for lid, (name, season) in LEAGUES.items()],
+        return_exceptions=True,
+    )
+
+    hz_games: list = []
+    q3_games: list = []
+    seen_ids: set  = set()
+    for r in results:
+        if not isinstance(r, tuple):
+            continue
+        hz, q3, _ = r
+        for g in hz:
+            if g["id"] not in seen_ids:
+                seen_ids.add(g["id"])
+                hz_games.append(g)
+        for g in q3:
+            if g["id"] not in seen_ids:
+                seen_ids.add(g["id"])
+                q3_games.append(g)
+
+    sent_count = 0
+
+    for g, sig_type in [(g, "hz") for g in hz_games] + [(g, "ft") for g in q3_games]:
+        dedup_key = (g["id"], sig_type)
+        if now - _auto_sent.get(dedup_key, 0) < AUTO_SENT_TTL:
+            continue
+
+        try:
+            sig = await _auto_signal_for_game(g, sig_type)
+        except Exception as e:
+            log.debug("auto-signal %s %s vs %s: %s", sig_type, g["home"], g["away"], e)
+            continue
+
+        if sig is None or sig["dir"] == "SKIP":
+            continue
+        if AUTO_SCAN_STUFE == "A" and sig["stufe"] != "A":
+            continue
+
+        league = g.get("league_name", "")
+        status = g.get("status", "HT") if sig_type == "hz" else "Q3 Break"
+        label  = f"🏀 {g['home']} vs {g['away']} ({league}) · {status}"
+        sig_with_note = {
+            **sig,
+            "reasons": list(sig.get("reasons", [])) + ["Auto-Scan · H2H als Referenzlinie"],
+        }
+        msg = _format_signal_msg(sig_with_note, label)
+        ok  = await _send_telegram(msg)
+        if ok:
+            _auto_sent[dedup_key] = now
+            sent_count += 1
+            log.info(
+                "🤖 Auto-signal: %s vs %s — %s ST-%s (%s)",
+                g["home"], g["away"], sig["dir"], sig["stufe"], sig_type.upper(),
+            )
+
+    return sent_count
+
+
+async def _auto_scan_loop() -> None:
+    """
+    Background loop that repeatedly calls _auto_scan_once() every AUTO_SCAN_INTERVAL seconds.
+    Disabled when API_SPORTS_KEY is not set.
+    """
+    if not API_KEY:
+        log.info("🤖 Auto-scan disabled (no API_SPORTS_KEY)")
+        return
+    log.info(
+        "🤖 Auto-scan loop started — interval: %ds, min_stufe: %s, h2h_min: %d",
+        AUTO_SCAN_INTERVAL, AUTO_SCAN_STUFE, H2H_MIN_SAMPLES,
+    )
+    while True:
+        try:
+            sent = await _auto_scan_once()
+            if sent:
+                log.info("🤖 Auto-scan cycle — %d signal(s) sent", sent)
+            else:
+                log.debug("🤖 Auto-scan cycle — no signals")
+        except Exception as e:
+            log.warning("Auto-scan loop error: %s", e)
+        await asyncio.sleep(AUTO_SCAN_INTERVAL)
+
+
 # ─── Live Games Helpers ───────────────────────────────────────────────────────
 
 async def _fetch_live_for_league(
@@ -2608,6 +2796,28 @@ async def live_scan():
         "telegram_sent": sent,
         "source":        "live",
     }
+
+
+@app.get("/api/auto-scan")
+async def auto_scan_trigger():
+    """
+    Manually trigger one auto-scan cycle and return the results.
+
+    The background loop runs automatically every AUTO_SCAN_INTERVAL seconds.
+    Use this endpoint to trigger an immediate scan, check the current config,
+    or verify that Telegram delivery is working.
+    """
+    sent = await _auto_scan_once()
+    return {
+        "sent":          sent,
+        "interval_s":    AUTO_SCAN_INTERVAL,
+        "min_stufe":     AUTO_SCAN_STUFE,
+        "h2h_min":       H2H_MIN_SAMPLES,
+        "dedup_entries": len(_auto_sent),
+        "hz_matchups":   len(_h2h_cache),
+        "ft_matchups":   len(_ft_h2h_cache),
+    }
+
 
 @app.get("/api/backfill")
 async def backfill(
