@@ -2404,12 +2404,16 @@ def _load_h2h_from_sheet() -> None:
                 val = float(ht_total)
                 if 0 < val <= H2H_HZ_MAX:
                     h2h_new.setdefault(key, []).append(val)
+                elif 0 < val / 100 <= H2H_HZ_MAX:
+                    h2h_new.setdefault(key, []).append(val / 100)
                 else:
                     log.warning("Skipping corrupt ht_total=%.0f for %s vs %s", val, home, away)
             if ft_total:
                 val = float(ft_total)
                 if 0 < val <= H2H_FT_MAX:
                     ft_new.setdefault(key, []).append(val)
+                elif 0 < val / 100 <= H2H_FT_MAX:
+                    ft_new.setdefault(key, []).append(val / 100)
                 else:
                     log.warning("Skipping corrupt ft_total=%.0f for %s vs %s", val, home, away)
 

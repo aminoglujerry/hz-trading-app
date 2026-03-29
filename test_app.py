@@ -7,6 +7,8 @@ Run with:  pytest test_app.py -v
 import pytest
 from fastapi.testclient import TestClient
 
+from unittest.mock import MagicMock, patch
+
 from app import (
     _hz_engine,
     _ft_engine,
@@ -24,6 +26,9 @@ from app import (
     H2H_MIN_SAMPLES,
     _ft_h2h_cache,
     _auto_sent,
+    _load_h2h_from_sheet,
+    H2H_HZ_MAX,
+    H2H_FT_MAX,
 )
 
 
@@ -894,3 +899,81 @@ class TestLiveEndpointNoKey:
         assert data["q3"] == []
         assert data["source"] == "no_key"
         assert data["count"] == 0
+
+
+# ─── _load_h2h_from_sheet normalization ───────────────────────────────────────
+
+
+class TestLoadH2hFromSheetNormalization:
+    """Sheet rows whose totals are stored ×100 must be normalised, not discarded."""
+
+    def _make_ws(self, rows: list[dict]):
+        ws = MagicMock()
+        ws.get_all_records.return_value = rows
+        return ws
+
+    def test_normal_values_loaded_unchanged(self):
+        rows = [{"date": "2026-01-01", "home": "TeamA", "away": "TeamB",
+                 "ht_total": 113, "ft_total": 225}]
+        with patch("app._get_worksheet", return_value=self._make_ws(rows)):
+            import app as _app
+            orig_hz = dict(_app._h2h_cache)
+            orig_ft = dict(_app._ft_h2h_cache)
+            _app._h2h_cache.clear()
+            _app._ft_h2h_cache.clear()
+            try:
+                _load_h2h_from_sheet()
+                key = _matchup_key("TeamA", "TeamB")
+                assert _app._h2h_cache.get(key) == [113.0]
+                assert _app._ft_h2h_cache.get(key) == [225.0]
+            finally:
+                _app._h2h_cache.clear()
+                _app._h2h_cache.update(orig_hz)
+                _app._ft_h2h_cache.clear()
+                _app._ft_h2h_cache.update(orig_ft)
+
+    def test_scaled_100x_values_normalised(self):
+        """Values like ht_total=11300 (=113×100) must be stored as 113.0."""
+        rows = [{"date": "2026-03-29", "home": "Santa Cruz Warriors",
+                 "away": "Texas Legends", "ht_total": 11300, "ft_total": 25000}]
+        with patch("app._get_worksheet", return_value=self._make_ws(rows)):
+            import app as _app
+            orig_hz = dict(_app._h2h_cache)
+            orig_ft = dict(_app._ft_h2h_cache)
+            _app._h2h_cache.clear()
+            _app._ft_h2h_cache.clear()
+            try:
+                _load_h2h_from_sheet()
+                key = _matchup_key("Santa Cruz Warriors", "Texas Legends")
+                assert key in _app._h2h_cache, "HZ matchup should be cached after normalisation"
+                assert abs(_app._h2h_cache[key][0] - 113.0) < 0.01
+                assert key in _app._ft_h2h_cache, "FT matchup should be cached after normalisation"
+                assert abs(_app._ft_h2h_cache[key][0] - 250.0) < 0.01
+            finally:
+                _app._h2h_cache.clear()
+                _app._h2h_cache.update(orig_hz)
+                _app._ft_h2h_cache.clear()
+                _app._ft_h2h_cache.update(orig_ft)
+
+    def test_truly_corrupt_values_skipped(self):
+        """Values that exceed even ×100 normalised range must still be skipped."""
+        bad_ht = H2H_HZ_MAX * 101  # too large even after /100
+        bad_ft = H2H_FT_MAX * 101
+        rows = [{"date": "2026-03-29", "home": "TeamX", "away": "TeamY",
+                 "ht_total": bad_ht, "ft_total": bad_ft}]
+        with patch("app._get_worksheet", return_value=self._make_ws(rows)):
+            import app as _app
+            orig_hz = dict(_app._h2h_cache)
+            orig_ft = dict(_app._ft_h2h_cache)
+            _app._h2h_cache.clear()
+            _app._ft_h2h_cache.clear()
+            try:
+                _load_h2h_from_sheet()
+                key = _matchup_key("TeamX", "TeamY")
+                assert key not in _app._h2h_cache
+                assert key not in _app._ft_h2h_cache
+            finally:
+                _app._h2h_cache.clear()
+                _app._h2h_cache.update(orig_hz)
+                _app._ft_h2h_cache.clear()
+                _app._ft_h2h_cache.update(orig_ft)
